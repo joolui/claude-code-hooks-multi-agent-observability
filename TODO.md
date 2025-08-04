@@ -51,7 +51,7 @@ Extend existing Bun server with usage endpoints that proxy to Python bridge. Add
 
 ### 2.1. Configuration Panel Component
 ```
-/sc:implement --type component "Usage configuration panel with all parameters" --persona-frontend --magic --c7 --validate
+/sc:implement --type component "Usage configuration panel with all parameters" --persona-frontend --c7 --validate
 
 Create UsageConfigPanel.vue with comprehensive parameter controls:
 - Plan selection (pro/max5/max20/custom) with custom token limit input

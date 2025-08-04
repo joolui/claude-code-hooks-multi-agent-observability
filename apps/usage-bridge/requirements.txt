@@ -1,0 +1,20 @@
+# FastAPI Python Bridge Service Dependencies
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+
+# Claude Monitor Integration (local dependency)
+# Note: claude-monitor will be installed via local path
+
+# Additional dependencies for robust API service
+python-multipart>=0.0.6  # For form data parsing
+httpx>=0.25.0           # For HTTP client requests
+aiofiles>=23.2.0        # For async file operations
+
+# Development dependencies
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+black>=23.0.0
+isort>=5.12.0
+mypy>=1.6.0
