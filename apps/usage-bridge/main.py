@@ -251,6 +251,22 @@ async def validate_config(config_data: UsageConfig):
         return {"valid": False, "error": str(e)}
 
 
+@app.get("/usage/monitor-info")
+async def get_monitor_info():
+    """Get comprehensive information about the Claude Monitor integration."""
+    try:
+        info = monitor.get_monitor_info()
+        return info
+    except Exception as e:
+        logger.error(f"Error getting monitor info: {e}")
+        return {
+            "available": False,
+            "error": str(e),
+            "modules_loaded": [],
+            "classes_available": []
+        }
+
+
 @app.get("/")
 async def root():
     """Root endpoint with service information."""
@@ -264,6 +280,8 @@ async def root():
             "usage_stats": "/usage/stats",
             "usage_config": "/usage/config",
             "usage_sessions": "/usage/sessions",
+            "monitor_info": "/usage/monitor-info",
+            "validate_config": "/usage/validate-config",
             "docs": "/docs" if config.debug else None
         }
     }

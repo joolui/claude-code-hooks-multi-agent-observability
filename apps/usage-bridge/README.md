@@ -4,7 +4,7 @@ FastAPI Python bridge service that integrates Claude-Code-Usage-Monitor with the
 
 ## 🎯 Implementation Status: **COMPLETE** ✅
 
-**SuperClaude `/sc:implement` execution successful** - Full FastAPI service with Claude Monitor integration, comprehensive error handling, and production-ready architecture.
+**SuperClaude `/sc:implement` + `/sc:build` execution successful** - Full FastAPI service with git submodule integration, dynamic property reading, comprehensive error handling, and production-ready architecture.
 
 ## Overview
 
@@ -18,10 +18,11 @@ Web UI → Bun Server → Usage Bridge API → Claude Monitor Library → Usage 
 ```
 
 **Key Design Principles:**
-- **Dynamic Integration**: Reads from Claude Monitor library (not copy-paste)
+- **Git Submodule Integration**: Claude Monitor as controlled git submodule
+- **Dynamic Property Reading**: Runtime property extraction with error handling
 - **Type Safety**: Complete Pydantic models matching all data structures
 - **Error Resilience**: Graceful degradation when Claude Monitor unavailable
-- **Auto-Detection**: Automatic Claude Monitor installation discovery
+- **Auto-Detection**: Prioritizes submodule over external installations
 - **Async Operations**: Non-blocking API with FastAPI async capabilities
 
 ## 🚀 Key Features
@@ -35,10 +36,12 @@ Web UI → Bun Server → Usage Bridge API → Claude Monitor Library → Usage 
 - **CORS Support**: Cross-origin requests for web dashboard integration
 
 ### ✅ **Advanced Integration Features**
-- **Auto-Detection**: Automatically finds Claude Monitor installation
-- **Library Wrapper**: Clean abstraction over Claude Monitor internals
-- **Configuration Validation**: Uses Claude Monitor's validation rules
-- **Type Mapping**: Converts Claude Monitor types to API-compatible formats
+- **Git Submodule**: Claude Monitor integrated as controlled git submodule
+- **Dynamic Property Reading**: Runtime property extraction with nested path support
+- **Enhanced Library Wrapper**: Comprehensive abstraction with error handling
+- **Auto-Detection**: Prioritizes submodule over external installations
+- **Configuration Validation**: Uses Claude Monitor's native validation rules
+- **Type Mapping**: Dynamic conversion between Claude Monitor and API types
 - **Session Correlation**: Links usage data with hook events by session ID
 
 ## API Endpoints
@@ -55,7 +58,10 @@ Web UI → Bun Server → Usage Bridge API → Claude Monitor Library → Usage 
 - `POST /usage/config` - Update configuration with validation
 - `GET /usage/validate-config` - Validate configuration without saving
 
-### Service Information
+### Monitor Integration
+- `GET /usage/monitor-info` - Comprehensive Claude Monitor integration status
+
+### Service Information  
 - `GET /` - Root endpoint with service information and available endpoints
 
 ## Configuration
@@ -86,11 +92,12 @@ BRIDGE_CONFIG_STORAGE_PATH=~/.claude-monitor-bridge
 
 ### Auto-Detection
 
-The service automatically detects Claude Monitor installation in these locations:
-1. `../../../Claude-Code-Usage-Monitor` (relative to project)
-2. `~/Claude-Code-Usage-Monitor`
-3. `/opt/claude-monitor`
-4. `/usr/local/claude-monitor`
+The service automatically detects Claude Monitor installation with priority order:
+1. **`../../Claude-Code-Usage-Monitor`** (git submodule - primary)
+2. `../../../Claude-Code-Usage-Monitor` (external installation)
+3. `~/Claude-Code-Usage-Monitor` (user installation)
+4. `/opt/claude-monitor` (system installation)
+5. `/usr/local/claude-monitor` (system installation)
 
 ## Installation & Setup
 
@@ -109,17 +116,27 @@ pip install -r requirements.txt
 uv pip install -r requirements.txt
 ```
 
-### Install Claude Monitor
+### Git Submodule Setup
 
-The service integrates with Claude Monitor as a library. Ensure it's installed:
+The service uses Claude Monitor as a git submodule (recommended approach):
 
 ```bash
-# If using the project's submodule
-cd ../../../Claude-Code-Usage-Monitor
-pip install -e .
+# Initialize submodule (first time setup)
+cd claude-code-hooks-multi-agent-observability
+git submodule update --init --recursive
 
-# Or install from PyPI
+# Install Claude Monitor from submodule
+pip install -e ./Claude-Code-Usage-Monitor
+```
+
+**Alternative Installation Methods:**
+```bash
+# Install from PyPI (fallback)
 pip install claude-monitor
+
+# Install from external clone
+cd /path/to/Claude-Code-Usage-Monitor
+pip install -e .
 ```
 
 ## Running the Service
@@ -134,8 +151,8 @@ cd apps/usage-bridge
 The startup script automatically:
 - Creates Python virtual environment
 - Installs all dependencies
-- Detects and installs Claude Monitor
-- Configures development environment
+- **Detects and installs Claude Monitor submodule**
+- Configures development environment  
 - Starts service with hot-reload
 
 ### Development Mode
@@ -208,6 +225,18 @@ curl "http://localhost:8001/usage/sessions?hours_back=48"
 curl "http://localhost:8001/health"
 ```
 
+### Get Monitor Integration Info
+
+```bash
+curl "http://localhost:8001/usage/monitor-info"
+```
+
+**Response includes:**
+- Submodule availability and path
+- Loaded modules and classes  
+- Integration status and version
+- Dynamic property reading capabilities
+
 ## Integration with Web Dashboard
 
 The service is designed to integrate with the Bun server and Vue client:
@@ -240,12 +269,18 @@ pytest test_api.py -v       # Comprehensive API validation tests
 
 # Full test suite
 pytest test_*.py -v         # All tests with coverage
+
+# Submodule integration tests
+python test_submodule_simple.py      # Basic submodule structure tests
+python test_submodule_integration.py # Comprehensive integration tests (requires deps)
 ```
 
 **Test Coverage:**
 - ✅ **API Endpoints** - All REST endpoints with error scenarios
 - ✅ **Configuration Validation** - Parameter validation and error handling
 - ✅ **Claude Monitor Integration** - Library wrapper and error resilience
+- ✅ **Git Submodule Integration** - Submodule structure and dynamic loading
+- ✅ **Dynamic Property Reading** - Runtime property extraction with error handling
 - ✅ **Health Checks** - Service status and dependency availability
 - ✅ **Error Handling** - Graceful failure scenarios
 
@@ -255,26 +290,35 @@ pytest test_*.py -v         # All tests with coverage
 
 ```
 apps/usage-bridge/
-├── main.py              # FastAPI application and endpoints
-├── models.py            # Pydantic models for API (type-safe)
-├── config.py            # Configuration management with auto-detection
-├── monitor.py           # Claude Monitor integration wrapper
-├── requirements.txt     # Python dependencies
-├── start.sh            # ✅ Automated startup script
-├── test_api.py         # ✅ Comprehensive API tests
-├── test_service.py     # ✅ Integration test script
-├── .env.sample         # ✅ Configuration template
-├── __init__.py         # ✅ Package initialization
-└── README.md           # This file (updated)
+├── main.py                       # FastAPI application and endpoints
+├── models.py                     # Pydantic models for API (type-safe)
+├── config.py                     # Configuration with submodule auto-detection
+├── monitor.py                    # Simplified Claude Monitor integration
+├── claude_monitor_wrapper.py     # ✅ Enhanced wrapper with dynamic property reading
+├── requirements.txt              # Python dependencies
+├── start.sh                     # ✅ Submodule-aware startup script
+├── test_api.py                  # ✅ Comprehensive API tests
+├── test_service.py              # ✅ Integration test script
+├── test_submodule_simple.py     # ✅ Basic submodule structure tests
+├── test_submodule_integration.py # ✅ Comprehensive integration tests
+├── .env.sample                  # ✅ Configuration template
+├── __init__.py                  # ✅ Package initialization
+├── SUBMODULE_INTEGRATION.md     # ✅ Submodule integration documentation
+└── README.md                    # This file (updated)
+
+../Claude-Code-Usage-Monitor/    # ✅ Git submodule (project root)
+├── src/claude_monitor/          # Claude Monitor source code
+└── pyproject.toml              # Package metadata
 ```
 
 ### **Adding New Endpoints**
 
 1. Define Pydantic models in `models.py`
 2. Add endpoint handlers in `main.py`
-3. Update Claude Monitor integration in `monitor.py` if needed
-4. Add appropriate error handling and logging
-5. **Add tests** in `test_api.py` and `test_service.py`
+3. Update Claude Monitor integration in `claude_monitor_wrapper.py` if needed
+4. Update simplified interface in `monitor.py`
+5. Add appropriate error handling and logging
+6. **Add tests** in `test_api.py`, `test_service.py`, and integration tests
 
 ### **Development Workflow**
 
@@ -285,11 +329,17 @@ apps/usage-bridge/
 # 2. Test endpoints
 python test_service.py
 
-# 3. Run unit tests
+# 3. Test submodule integration
+python test_submodule_simple.py
+
+# 4. Run unit tests
 pytest test_api.py -v
 
-# 4. Check service status
+# 5. Check service status
 curl http://localhost:8001/health
+
+# 6. Check integration status
+curl http://localhost:8001/usage/monitor-info
 ```
 
 ## Troubleshooting
@@ -297,9 +347,11 @@ curl http://localhost:8001/health
 ### Common Issues
 
 1. **Claude Monitor Not Found**
-   - Check `BRIDGE_CLAUDE_MONITOR_PATH` environment variable
-   - Verify Claude Monitor is installed and accessible
-   - Check logs for auto-detection results
+   - **First**: Verify git submodule is initialized: `git submodule update --init --recursive`
+   - Check submodule exists: `ls -la Claude-Code-Usage-Monitor/`
+   - Check `BRIDGE_CLAUDE_MONITOR_PATH` environment variable (optional)
+   - Verify installation: `pip list | grep claude-monitor`
+   - Check logs for auto-detection results and submodule priority
 
 2. **CORS Errors**
    - Update `BRIDGE_CORS_ORIGINS` to include your web dashboard URL
@@ -312,8 +364,14 @@ curl http://localhost:8001/health
 
 4. **Empty Usage Data**
    - Verify Claude usage data files exist in the expected location
-   - Check Claude Monitor can read usage data independently
+   - Check Claude Monitor can read usage data independently  
    - Review logs for data processing errors
+   - Test submodule integration: `python test_submodule_simple.py`
+
+5. **Submodule Issues**
+   - Update submodule: `cd Claude-Code-Usage-Monitor && git pull origin main`
+   - Reinstall: `pip install -e ./Claude-Code-Usage-Monitor`
+   - Check integration status: `curl http://localhost:8001/usage/monitor-info`
 
 ### Logging
 
@@ -375,12 +433,43 @@ websocket.send(JSON.stringify({
 ## 🎯 **Implementation Success Metrics**
 
 ✅ **Complete FastAPI service** with all endpoints implemented  
-✅ **Dynamic Claude Monitor integration** with auto-detection  
+✅ **Git submodule integration** with Claude Monitor as controlled dependency  
+✅ **Dynamic property reading** with runtime extraction and error handling  
+✅ **Enhanced library wrapper** with comprehensive abstraction  
+✅ **Auto-detection logic** prioritizing submodule over external installations  
 ✅ **Comprehensive error handling** and graceful degradation  
 ✅ **Type-safe data models** matching PDK specifications  
-✅ **Development tooling** with startup scripts and tests  
-✅ **Documentation** with complete API reference  
+✅ **Development tooling** with startup scripts and comprehensive tests  
+✅ **Documentation** with complete API reference and integration guide  
 ✅ **Server type extensions** for full-stack integration
+
+## 🔄 **Submodule Management**
+
+### **Update Submodule to Latest**
+```bash
+cd Claude-Code-Usage-Monitor
+git fetch origin
+git checkout main  # or specific version tag
+cd ..
+git add Claude-Code-Usage-Monitor
+git commit -m "Update Claude Monitor submodule to latest version"
+```
+
+### **Rollback Submodule Version**
+```bash
+cd Claude-Code-Usage-Monitor
+git checkout PREVIOUS_COMMIT_HASH
+cd ..
+git add Claude-Code-Usage-Monitor  
+git commit -m "Rollback Claude Monitor submodule to stable version"
+```
+
+### **Check Submodule Status**
+```bash
+git submodule status
+curl http://localhost:8001/usage/monitor-info  # Runtime status
+python test_submodule_simple.py               # Structure verification
+```
 
 ## Future Enhancements
 

@@ -30,14 +30,22 @@ echo -e "${BLUE}📥 Installing dependencies${NC}"
 pip install -q --upgrade pip
 pip install -q -r requirements.txt
 
-# Check if Claude Monitor is available
-CLAUDE_MONITOR_PATH="${SCRIPT_DIR}/../../../Claude-Code-Usage-Monitor"
-if [[ -d "$CLAUDE_MONITOR_PATH/src/claude_monitor" ]]; then
-    echo -e "${GREEN}✅ Claude Monitor found at: $CLAUDE_MONITOR_PATH${NC}"
+# Check if Claude Monitor is available (prioritize submodule)
+CLAUDE_MONITOR_SUBMODULE="${SCRIPT_DIR}/../../Claude-Code-Usage-Monitor"
+CLAUDE_MONITOR_EXTERNAL="${SCRIPT_DIR}/../../../Claude-Code-Usage-Monitor"
+
+if [[ -d "$CLAUDE_MONITOR_SUBMODULE/src/claude_monitor" ]]; then
+    echo -e "${GREEN}✅ Claude Monitor submodule found at: $CLAUDE_MONITOR_SUBMODULE${NC}"
+    # Install Claude Monitor from submodule in development mode
+    pip install -q -e "$CLAUDE_MONITOR_SUBMODULE"
+elif [[ -d "$CLAUDE_MONITOR_EXTERNAL/src/claude_monitor" ]]; then
+    echo -e "${GREEN}✅ Claude Monitor found at: $CLAUDE_MONITOR_EXTERNAL${NC}"
     # Install Claude Monitor in development mode
-    pip install -q -e "$CLAUDE_MONITOR_PATH"
+    pip install -q -e "$CLAUDE_MONITOR_EXTERNAL"
 else
-    echo -e "${YELLOW}⚠️  Claude Monitor not found at expected path: $CLAUDE_MONITOR_PATH${NC}"
+    echo -e "${YELLOW}⚠️  Claude Monitor not found at expected paths:${NC}"
+    echo -e "${YELLOW}   - Submodule: $CLAUDE_MONITOR_SUBMODULE${NC}"
+    echo -e "${YELLOW}   - External: $CLAUDE_MONITOR_EXTERNAL${NC}"
     echo -e "${YELLOW}   Service will run but return empty data${NC}"
 fi
 

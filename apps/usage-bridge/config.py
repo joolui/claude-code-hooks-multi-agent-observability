@@ -60,8 +60,14 @@ class BridgeConfig(BaseSettings):
 
     def _detect_claude_monitor_path(self) -> Optional[Path]:
         """Auto-detect Claude Monitor installation path."""
-        # First, try relative path from current project
+        # First, try git submodule path (primary location)
         current_dir = Path(__file__).parent
+        submodule_path = current_dir.parent.parent / "Claude-Code-Usage-Monitor"
+        
+        if submodule_path.exists() and (submodule_path / "src" / "claude_monitor").exists():
+            return submodule_path
+        
+        # Fallback: try relative path from parent directory structure
         relative_path = current_dir.parent.parent.parent / "Claude-Code-Usage-Monitor"
         
         if relative_path.exists() and (relative_path / "src" / "claude_monitor").exists():

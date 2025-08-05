@@ -101,6 +101,13 @@ def main():
             "name": "Get Usage Sessions (48h)",
             "url": f"{base_url}/usage/sessions?hours_back=48",
             "method": "GET"
+        },
+        
+        # Monitor information tests
+        {
+            "name": "Get Monitor Info",
+            "url": f"{base_url}/usage/monitor-info",
+            "method": "GET"
         }
     ]
     
