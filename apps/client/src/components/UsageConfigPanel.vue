@@ -26,23 +26,51 @@
           </div>
           
           <!-- Custom token limit input -->
-          <div v-if="config.plan === 'custom'" class="mt-3">
-            <label class="block text-sm font-medium text-[var(--theme-text-primary)] mb-1">
-              Custom Token Limit
-            </label>
-            <input 
-              type="number"
-              v-model.number="config.customTokenLimit"
-              :min="1000"
-              :max="1000000"
-              step="1000"
-              class="w-full px-3 py-2 border border-[var(--theme-primary)] rounded-lg focus:ring-2 focus:ring-[var(--theme-primary)]/30 focus:border-[var(--theme-primary-dark)] bg-[var(--theme-bg-primary)] text-[var(--theme-text-primary)]"
-              placeholder="Enter token limit"
-              required
-            >
-            <div class="mt-1 flex justify-between text-xs text-[var(--theme-text-secondary)]">
-              <span>Min: 1,000</span>
-              <span>Max: 1,000,000</span>
+          <div v-if="config.plan === 'custom'" class="mt-3 space-y-3">
+            <div>
+              <label class="block text-sm font-medium text-[var(--theme-text-primary)] mb-1">
+                Custom Token Limit
+              </label>
+              <input 
+                type="number"
+                v-model.number="config.customTokenLimit"
+                :min="1000"
+                :max="1000000"
+                step="1000"
+                class="w-full px-3 py-2 border border-[var(--theme-primary)] rounded-lg focus:ring-2 focus:ring-[var(--theme-primary)]/30 focus:border-[var(--theme-primary-dark)] bg-[var(--theme-bg-primary)] text-[var(--theme-text-primary)]"
+                placeholder="Enter token limit"
+                required
+              >
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-[var(--theme-text-primary)] mb-1">
+                Custom Message Limit
+              </label>
+              <input 
+                type="number"
+                v-model.number="config.customMessageLimit"
+                :min="100"
+                :max="100000"
+                step="100"
+                class="w-full px-3 py-2 border border-[var(--theme-primary)] rounded-lg focus:ring-2 focus:ring-[var(--theme-primary)]/30 focus:border-[var(--theme-primary-dark)] bg-[var(--theme-bg-primary)] text-[var(--theme-text-primary)]"
+                placeholder="Enter message limit"
+                required
+              >
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-[var(--theme-text-primary)] mb-1">
+                Custom Cost Limit ($)
+              </label>
+              <input 
+                type="number"
+                v-model.number="config.customCostLimit"
+                :min="1"
+                :max="1000"
+                step="0.01"
+                class="w-full px-3 py-2 border border-[var(--theme-primary)] rounded-lg focus:ring-2 focus:ring-[var(--theme-primary)]/30 focus:border-[var(--theme-primary-dark)] bg-[var(--theme-bg-primary)] text-[var(--theme-text-primary)]"
+                placeholder="Enter cost limit"
+                required
+              >
             </div>
           </div>
         </div>
@@ -195,10 +223,13 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
+import { useUsageConfig } from '../composables/useUsageConfig'
 
-interface UsageConfig {
+interface Config {
   plan: 'pro' | 'max5' | 'max20' | 'custom'
   customTokenLimit: number
+  customMessageLimit: number
+  customCostLimit: number
   viewMode: 'realtime' | 'daily' | 'monthly'
   timezone: string
   timeFormat: '12h' | '24h'
@@ -206,71 +237,58 @@ interface UsageConfig {
   dailyResetHour: number
 }
 
-const config = ref<UsageConfig>({
-  plan: 'pro',
-  customTokenLimit: 10000,
-  viewMode: 'realtime',
-  timezone: 'auto',
-  timeFormat: '24h',
-  refreshRate: 5,
-  dailyResetHour: 0
+// Use the usage config composable
+const usageConfig = useUsageConfig()
+
+// Create a reactive config that mirrors the composable
+const config = computed({
+  get: () => ({
+    plan: usageConfig.config.value.plan,
+    customTokenLimit: usageConfig.config.value.customTokenLimit,
+    customMessageLimit: usageConfig.config.value.customMessageLimit,
+    customCostLimit: usageConfig.config.value.customCostLimit,
+    viewMode: usageConfig.config.value.viewMode,
+    timezone: usageConfig.config.value.timezone,
+    timeFormat: usageConfig.config.value.timeFormat,
+    refreshRate: usageConfig.config.value.refreshRate / 1000, // Convert from ms to seconds for UI
+    dailyResetHour: usageConfig.config.value.dailyResetHour
+  }),
+  set: (value) => {
+    usageConfig.updateConfig({
+      plan: value.plan,
+      customTokenLimit: value.customTokenLimit,
+      customMessageLimit: value.customMessageLimit,
+      customCostLimit: value.customCostLimit,
+      viewMode: value.viewMode,
+      timezone: value.timezone,
+      timeFormat: value.timeFormat,
+      refreshRate: value.refreshRate * 1000, // Convert from seconds to ms
+      dailyResetHour: value.dailyResetHour
+    })
+  }
 })
 
 const saving = ref(false)
 const showSuccessMessage = ref(false)
 
-const planOptions = [
-  { value: 'pro', label: 'Pro Plan', tokens: '200K tokens/month' },
-  { value: 'max5', label: 'Max 5 Plan', tokens: '5M tokens/month' },
-  { value: 'max20', label: 'Max 20 Plan', tokens: '20M tokens/month' },
-  { value: 'custom', label: 'Custom Limit', tokens: null }
-]
+// Use plan options from the composable
+const planOptions = computed(() => 
+  usageConfig.planOptions.value.map(option => ({
+    value: option.value,
+    label: option.label,
+    tokens: option.value === 'custom' ? null : `${(option.tokens / 1000).toFixed(0)}K tokens`
+  }))
+)
 
-const viewModes = [
-  { value: 'realtime', label: 'Real-time' },
-  { value: 'daily', label: 'Daily' },
-  { value: 'monthly', label: 'Monthly' }
-]
+const viewModes = computed(() => usageConfig.viewModeOptions.value)
+const timezones = computed(() => usageConfig.timezoneOptions.value)
 
-const timezones = [
-  { value: 'UTC', label: 'UTC (Coordinated Universal Time)' },
-  { value: 'America/New_York', label: 'Eastern Time (ET)' },
-  { value: 'America/Chicago', label: 'Central Time (CT)' },
-  { value: 'America/Denver', label: 'Mountain Time (MT)' },
-  { value: 'America/Los_Angeles', label: 'Pacific Time (PT)' },
-  { value: 'Europe/London', label: 'GMT (Greenwich Mean Time)' },
-  { value: 'Europe/Paris', label: 'CET (Central European Time)' },
-  { value: 'Asia/Tokyo', label: 'JST (Japan Standard Time)' },
-  { value: 'Asia/Shanghai', label: 'CST (China Standard Time)' },
-  { value: 'Australia/Sydney', label: 'AEST (Australian Eastern Time)' }
-]
+// Use validation from the composable
+const validationErrors = computed(() => 
+  usageConfig.validationErrors.value.map(error => error.message)
+)
 
-const validationErrors = computed(() => {
-  const errors: string[] = []
-  
-  if (config.value.plan === 'custom') {
-    if (!config.value.customTokenLimit || config.value.customTokenLimit < 1000) {
-      errors.push('Custom token limit must be at least 1,000')
-    }
-    if (config.value.customTokenLimit > 1000000) {
-      errors.push('Custom token limit cannot exceed 1,000,000')
-    }
-  }
-  
-  if (config.value.refreshRate < 1 || config.value.refreshRate > 60) {
-    errors.push('Refresh rate must be between 1 and 60 seconds')
-  }
-  
-  if (config.value.dailyResetHour < 0 || config.value.dailyResetHour > 23) {
-    errors.push('Daily reset hour must be between 0 and 23')
-  }
-  
-  return errors
-})
-
-const isFormValid = computed(() => {
-  return validationErrors.value.length === 0
-})
+const isFormValid = computed(() => usageConfig.isValid.value)
 
 const getRefreshRateDescription = (rate: number): string => {
   if (rate <= 2) return 'Very fast updates, high resource usage'
@@ -301,20 +319,15 @@ const saveConfig = async () => {
   showSuccessMessage.value = false
   
   try {
-    // Save to localStorage
-    localStorage.setItem('usageConfig', JSON.stringify(config.value))
+    // Use the composable's save method
+    const success = usageConfig.validateAndSave()
     
-    // Here you would typically send to your API
-    // await fetch('/api/usage/config', {
-    //   method: 'POST',
-    //   headers: { 'Content-Type': 'application/json' },
-    //   body: JSON.stringify(config.value)
-    // })
-    
-    showSuccessMessage.value = true
-    setTimeout(() => {
-      showSuccessMessage.value = false
-    }, 3000)
+    if (success) {
+      showSuccessMessage.value = true
+      setTimeout(() => {
+        showSuccessMessage.value = false
+      }, 3000)
+    }
     
   } catch (error) {
     console.error('Failed to save configuration:', error)

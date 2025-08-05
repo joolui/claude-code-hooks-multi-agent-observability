@@ -62,35 +62,70 @@
         </div>
       </div>
     </header>
+
+    <!-- Tab Navigation -->
+    <nav class="bg-[var(--theme-bg-primary)] border-b border-[var(--theme-primary)]/20 px-4">
+      <div class="flex space-x-1" role="tablist">
+        <button
+          v-for="tab in tabs"
+          :key="tab.id"
+          @click="activeTab = tab.id"
+          @keydown="handleTabKeydown($event, tab.id)"
+          :class="[
+            'px-4 py-3 mobile:px-3 mobile:py-2 text-sm font-medium rounded-t-lg transition-all duration-200 flex items-center space-x-2 border-b-2 focus:outline-none focus:ring-2 focus:ring-[var(--theme-primary)]/50',
+            activeTab === tab.id
+              ? 'bg-[var(--theme-bg-secondary)] text-[var(--theme-primary)] border-[var(--theme-primary)] shadow-sm'
+              : 'text-[var(--theme-text-secondary)] hover:text-[var(--theme-text-primary)] hover:bg-[var(--theme-bg-secondary)]/50 border-transparent'
+          ]"
+          :aria-selected="activeTab === tab.id"
+          :tabindex="activeTab === tab.id ? 0 : -1"
+          role="tab"
+        >
+          <span class="text-lg mobile:text-base">{{ tab.icon }}</span>
+          <span class="mobile:hidden">{{ tab.label }}</span>
+        </button>
+      </div>
+    </nav>
     
-    <!-- Filters -->
-    <FilterPanel
-      v-if="showFilters"
-      :filters="filters"
-      @update:filters="filters = $event"
-    />
-    
-    <!-- Usage Configuration Panel -->
-    <UsageConfigPanel v-if="showUsageConfig" />
-    
-    <!-- Live Pulse Chart -->
-    <LivePulseChart
-      :events="events"
-      :filters="filters"
-    />
-    
-    <!-- Timeline -->
-    <EventTimeline
-      :events="events"
-      :filters="filters"
-      v-model:stick-to-bottom="stickToBottom"
-    />
-    
-    <!-- Stick to bottom button -->
-    <StickScrollButton
-      :stick-to-bottom="stickToBottom"
-      @toggle="stickToBottom = !stickToBottom"
-    />
+    <!-- Tab Content -->
+    <div class="flex-1 overflow-hidden">
+      <!-- Events Tab -->
+      <div v-if="activeTab === 'events'" class="h-full flex flex-col">
+        <!-- Filters -->
+        <FilterPanel
+          v-if="showFilters"
+          :filters="filters"
+          @update:filters="filters = $event"
+        />
+        
+        <!-- Usage Configuration Panel -->
+        <UsageConfigPanel v-if="showUsageConfig" />
+        
+        <!-- Live Pulse Chart -->
+        <LivePulseChart
+          :events="events"
+          :filters="filters"
+        />
+        
+        <!-- Timeline -->
+        <EventTimeline
+          :events="events"
+          :filters="filters"
+          v-model:stick-to-bottom="stickToBottom"
+        />
+        
+        <!-- Stick to bottom button (Events tab only) -->
+        <StickScrollButton
+          :stick-to-bottom="stickToBottom"
+          @toggle="stickToBottom = !stickToBottom"
+        />
+      </div>
+
+      <!-- Usage Monitor Tab -->
+      <div v-if="activeTab === 'usage'" class="h-full overflow-auto">
+        <UsageDashboard />
+      </div>
+    </div>
     
     <!-- Error message -->
     <div
@@ -118,6 +153,7 @@ import StickScrollButton from './components/StickScrollButton.vue';
 import LivePulseChart from './components/LivePulseChart.vue';
 import ThemeManager from './components/ThemeManager.vue';
 import UsageConfigPanel from './components/UsageConfigPanel.vue';
+import UsageDashboard from './components/UsageDashboard.vue';
 
 // WebSocket connection
 const { events, isConnected, error } = useWebSocket('ws://localhost:4000/stream');
@@ -137,6 +173,21 @@ const stickToBottom = ref(true);
 const showThemeManager = ref(false);
 const showFilters = ref(false);
 const showUsageConfig = ref(false);
+const activeTab = ref('events');
+
+// Tab configuration
+const tabs = ref([
+  {
+    id: 'events',
+    label: 'Events Monitor',
+    icon: '📊'
+  },
+  {
+    id: 'usage',
+    label: 'Usage Monitor', 
+    icon: '📈'
+  }
+]);
 
 // Computed properties
 const isDark = computed(() => {
@@ -144,6 +195,43 @@ const isDark = computed(() => {
          (themeState.value.isCustomTheme && 
           themeState.value.customThemes.find(t => t.id === themeState.value.currentTheme)?.name.includes('dark'));
 });
+
+// Tab navigation keyboard support
+const handleTabKeydown = (event: KeyboardEvent, tabId: string) => {
+  const currentIndex = tabs.value.findIndex(tab => tab.id === tabId);
+  let nextIndex = currentIndex;
+
+  switch (event.key) {
+    case 'ArrowLeft':
+      event.preventDefault();
+      nextIndex = currentIndex > 0 ? currentIndex - 1 : tabs.value.length - 1;
+      break;
+    case 'ArrowRight':
+      event.preventDefault();
+      nextIndex = currentIndex < tabs.value.length - 1 ? currentIndex + 1 : 0;
+      break;
+    case 'Home':
+      event.preventDefault();
+      nextIndex = 0;
+      break;
+    case 'End':
+      event.preventDefault();
+      nextIndex = tabs.value.length - 1;
+      break;
+    case 'Enter':
+    case ' ':
+      event.preventDefault();
+      activeTab.value = tabId;
+      return;
+  }
+
+  if (nextIndex !== currentIndex) {
+    activeTab.value = tabs.value[nextIndex].id;
+    // Focus the new tab for keyboard navigation
+    const nextTabButton = document.querySelector(`[role="tab"][aria-selected="true"]`) as HTMLElement;
+    nextTabButton?.focus();
+  }
+};
 
 // Debug handler for theme manager
 const handleThemeManagerClick = () => {

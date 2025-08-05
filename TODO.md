@@ -71,7 +71,7 @@ Add "Usage Monitor" tab to main navigation. Create basic UsageDashboard.vue comp
 
 ### 2.3. Progress Visualization Component
 ```
-/sc:implement --type component "Usage progress bars with color coding" --persona-frontend --magic --validate --focus accessibility
+/sc:implement --type component "Usage progress bars with color coding" --persona-frontend --validate --focus accessibility
 
 Create UsageProgressBars.vue component with:
 - Cost usage progress bar (green/yellow/red states)
@@ -92,14 +92,14 @@ Implement real-time data fetching composables:
 - WebSocket integration with existing event stream
 - Error handling and reconnection logic
 ```
-
+# DONE
 ---
 
 ## 🚀 Phase 3: Advanced Features (Week 3)
 
 ### 3.1. Advanced Statistics Component
 ```
-/sc:implement --type component "Real-time usage statistics display" --persona-frontend --magic --performance --validate
+/sc:implement --type component "Real-time usage statistics display" --persona-frontend --performance --validate
 
 Create UsageStats.vue for:
 - Burn rate and cost rate real-time display
@@ -149,7 +149,7 @@ Integrate ML-based predictions from Claude monitor:
 
 ### 4.1. Theme System Integration
 ```
-/sc:improve --type integration "Usage components theme consistency" --persona-frontend --magic --validate
+/sc:improve --type integration "Usage components theme consistency" --persona-frontend --validate
 
 Integrate usage components with existing theme system:
 - Usage-specific color schemes for each theme
@@ -160,7 +160,7 @@ Integrate usage components with existing theme system:
 
 ### 4.2. Mobile Optimization
 ```
-/sc:improve --type responsive "Mobile-first usage dashboard optimization" --persona-frontend --magic --validate --focus accessibility
+/sc:improve --type responsive "Mobile-first usage dashboard optimization" --persona-frontend --validate --focus accessibility
 
 Optimize usage dashboard for mobile devices:
 - Responsive layouts for all screen sizes
