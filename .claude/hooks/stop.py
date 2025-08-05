@@ -54,7 +54,7 @@ def get_completion_messages():
 def get_tts_script_path():
     """
     Determine which TTS script to use based on available API keys.
-    Priority order: Rime > Google Cloud > ElevenLabs > OpenAI > pyttsx3
+    Priority order: Rime > Google Cloud > ElevenLabs > OpenAI > Windows TTS (WSL) > pyttsx3
     """
     # Get current script directory and construct utils/tts path
     script_dir = Path(__file__).parent
@@ -93,6 +93,12 @@ def get_tts_script_path():
         if openai_script.exists():
             return str(openai_script)
     
+    # Check if we're in WSL environment and Windows TTS is available
+    if os.path.exists('/proc/version') and 'Microsoft' in open('/proc/version').read():
+        windows_script = tts_dir / "windows_tts.py"
+        if windows_script.exists():
+            return str(windows_script)
+    
     # Fall back to pyttsx3 (no API key required)
     pyttsx3_script = tts_dir / "pyttsx3_tts.py"
     if pyttsx3_script.exists():
@@ -113,7 +119,7 @@ def get_llm_completion_message():
     script_dir = Path(__file__).parent
     llm_dir = script_dir / "utils" / "llm"
 
-    # Try Anthropic second
+    # Try Anthropic first
     if os.getenv("ANTHROPIC_API_KEY"):
         anth_script = llm_dir / "anth.py"
         if anth_script.exists():
@@ -129,7 +135,7 @@ def get_llm_completion_message():
             except (subprocess.TimeoutExpired, subprocess.SubprocessError):
                 pass
 
-    # Try OpenAI first (highest priority)
+    # Try OpenAI second
     if os.getenv("OPENAI_API_KEY"):
         oai_script = llm_dir / "oai.py"
         if oai_script.exists():

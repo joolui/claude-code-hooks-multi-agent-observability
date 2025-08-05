@@ -42,6 +42,15 @@
             <span class="text-2xl mobile:text-lg">📊</span>
           </button>
           
+          <!-- Usage Config Toggle Button -->
+          <button
+            @click="showUsageConfig = !showUsageConfig"
+            class="p-3 mobile:p-1.5 rounded-lg bg-white/20 hover:bg-white/30 transition-all duration-200 border border-white/30 hover:border-white/50 backdrop-blur-sm shadow-lg hover:shadow-xl"
+            :title="showUsageConfig ? 'Hide usage config' : 'Show usage config'"
+          >
+            <span class="text-2xl mobile:text-lg">⚙️</span>
+          </button>
+          
           <!-- Theme Manager Button -->
           <button
             @click="handleThemeManagerClick"
@@ -60,6 +69,9 @@
       :filters="filters"
       @update:filters="filters = $event"
     />
+    
+    <!-- Usage Configuration Panel -->
+    <UsageConfigPanel v-if="showUsageConfig" />
     
     <!-- Live Pulse Chart -->
     <LivePulseChart
@@ -105,6 +117,7 @@ import FilterPanel from './components/FilterPanel.vue';
 import StickScrollButton from './components/StickScrollButton.vue';
 import LivePulseChart from './components/LivePulseChart.vue';
 import ThemeManager from './components/ThemeManager.vue';
+import UsageConfigPanel from './components/UsageConfigPanel.vue';
 
 // WebSocket connection
 const { events, isConnected, error } = useWebSocket('ws://localhost:4000/stream');
@@ -123,6 +136,7 @@ const filters = ref({
 const stickToBottom = ref(true);
 const showThemeManager = ref(false);
 const showFilters = ref(false);
+const showUsageConfig = ref(false);
 
 // Computed properties
 const isDark = computed(() => {
