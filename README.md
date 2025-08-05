@@ -12,9 +12,53 @@ This system provides complete observability into Claude Code agent behavior by c
 
 ```
 Claude Agents → Hook Scripts → HTTP POST → Bun Server → SQLite → WebSocket → Vue Client
+                                         ↓
+                               Python Bridge → Claude Monitor → Usage Data
 ```
 
 ![Agent Data Flow Animation](images/AgentDataFlowV2.gif)
+
+## 🌉 Python Bridge Integration
+
+The system now includes **comprehensive integration with the Claude-Code-Usage-Monitor** through a Python bridge service, providing:
+
+### ✅ **Real-time Usage Monitoring**
+- **Token Usage Tracking** - Monitor input/output tokens, cache usage, and costs in real-time
+- **Session Correlation** - Link usage data with event data via session IDs
+- **Burn Rate Analysis** - Track tokens per minute and cost per hour
+- **Limit Predictions** - Predict when usage limits will be reached
+
+### ✅ **Bridge Proxy System**
+- **Intelligent Fallback** - Automatically falls back to mock data when bridge is unavailable
+- **Health Monitoring** - Continuous bridge health checking and status reporting
+- **Configuration Sync** - Updates both bridge and local database configurations
+- **WebSocket Broadcasting** - Usage updates broadcast alongside events in real-time
+
+### ✅ **Usage API Endpoints**
+```bash
+# Get current usage statistics (proxied to Python bridge)
+GET /api/usage/stats?plan=pro&theme=dark
+
+# Get usage session history (bridge + database fallback)
+GET /api/usage/sessions?hours_back=24&limit=100
+
+# Update usage configuration (bridge + local sync)
+POST /api/usage/config
+
+# Check Python bridge status
+GET /api/usage/bridge/status
+```
+
+### 🔧 **Bridge Configuration**
+Set environment variables to configure the Python bridge:
+```bash
+USAGE_BRIDGE_URL=http://localhost:8001      # Bridge service URL
+USAGE_BRIDGE_TIMEOUT=5000                   # Request timeout (ms)
+USAGE_BRIDGE_RETRIES=2                      # Retry attempts
+USAGE_BRIDGE_ENABLED=true                   # Enable/disable bridge
+```
+
+The bridge integration provides seamless operation whether the Python usage monitor is running or not, with intelligent fallback to ensure the observability system remains fully functional.
 
 ## 📋 Setup Requirements
 
@@ -123,11 +167,18 @@ cp -R .claude <directory of your codebase you want to emit events from>
 claude-code-hooks-multi-agent-observability/
 │
 ├── apps/                    # Application components
-│   ├── server/             # Bun TypeScript server
+│   ├── server/             # Bun TypeScript server with Python bridge integration
 │   │   ├── src/
 │   │   │   ├── index.ts    # Main server with HTTP/WebSocket endpoints
 │   │   │   ├── db.ts       # SQLite database management & migrations
-│   │   │   └── types.ts    # TypeScript interfaces
+│   │   │   ├── bridge.ts   # Python bridge proxy and fallback system
+│   │   │   ├── migrations.ts # Database migration system with rollback
+│   │   │   └── types.ts    # TypeScript interfaces (events + usage)
+│   │   ├── scripts/
+│   │   │   ├── migrate.ts  # Migration management CLI
+│   │   │   ├── test-usage-api.ts # Usage API test suite
+│   │   │   ├── test-migrations.ts # Migration system tests
+│   │   │   └── test-bridge-integration.ts # Bridge integration tests
 │   │   ├── package.json
 │   │   └── events.db       # SQLite database (gitignored)
 │   │
@@ -195,19 +246,27 @@ The hook system intercepts Claude Code lifecycle events:
 
 ### 2. Server (`apps/server/`)
 
-Bun-powered TypeScript server with real-time capabilities:
+Bun-powered TypeScript server with real-time capabilities and Python bridge integration:
 
-- **Database**: SQLite with WAL mode for concurrent access
-- **Endpoints**:
+- **Database**: SQLite with WAL mode, migrations, and usage tracking
+- **Core Endpoints**:
   - `POST /events` - Receive events from agents
   - `GET /events/recent` - Paginated event retrieval with filtering
   - `GET /events/filter-options` - Available filter values
-  - `WS /stream` - Real-time event broadcasting
+  - `WS /stream` - Real-time event and usage broadcasting
+- **Usage Bridge Endpoints**:
+  - `GET /api/usage/stats` - Current usage statistics (proxied to Python bridge)
+  - `GET /api/usage/config` - Usage configuration management
+  - `POST /api/usage/config` - Update configuration (bridge + local sync)
+  - `GET /api/usage/sessions` - Session history (bridge + database fallback)
+  - `GET /api/usage/bridge/status` - Python bridge health monitoring
 - **Features**:
-  - Automatic schema migrations
-  - Event validation
-  - WebSocket broadcast to all clients
-  - Chat transcript storage
+  - **Python Bridge Integration** - Intelligent proxy with fallback mechanisms
+  - **Real-time Usage Updates** - WebSocket broadcasting of usage data
+  - **Automatic Migrations** - Database schema evolution with rollback support
+  - **Event Validation** - Input validation and security checks
+  - **Health Monitoring** - Bridge connectivity and error handling
+  - **Historical Storage** - Usage snapshot storage for analytics
 
 ### 3. Client (`apps/client/`)
 
@@ -237,6 +296,7 @@ Vue 3 application with real-time visualization:
 
 ## 🔄 Data Flow
 
+### Event Flow
 1. **Event Generation**: Claude Code executes an action (tool use, notification, etc.)
 2. **Hook Activation**: Corresponding hook script runs based on `settings.json` configuration
 3. **Data Collection**: Hook script gathers context (tool name, inputs, outputs, session ID)
@@ -245,7 +305,22 @@ Vue 3 application with real-time visualization:
    - Validates event structure
    - Stores in SQLite with timestamp
    - Broadcasts to WebSocket clients
+   - **Triggers usage update** for significant events (PreToolUse, PostToolUse, Stop, etc.)
 6. **Client Update**: Vue app receives event and updates timeline in real-time
+
+### Usage Data Flow
+1. **Usage Trigger**: Significant events trigger usage data requests
+2. **Bridge Query**: Server queries Python bridge for current usage statistics
+3. **Fallback Logic**: If bridge unavailable, serves mock data to maintain functionality
+4. **Data Storage**: Bridge responses stored as usage snapshots in local database
+5. **Real-time Broadcast**: Usage updates broadcast via WebSocket alongside events
+6. **Client Integration**: Vue app displays usage data with session correlation
+
+### WebSocket Message Types
+- **`event`** - Hook event data with session correlation
+- **`usage_update`** - Real-time usage statistics and burn rates
+- **`initial`** - Initial connection data (recent events + current usage)
+- **`error`** - Error messages and bridge status updates
 
 ## 🎨 Event Types & Visualization
 
@@ -307,10 +382,26 @@ Already integrated! Hooks run both validation and observability:
 
 ## 🧪 Testing
 
+### System Testing
 ```bash
-# System validation
+# Full system validation
 ./scripts/test-system.sh
 
+# Server-specific tests
+cd apps/server
+
+# Usage API test suite
+bun scripts/test-usage-api.ts
+
+# Database migration tests
+bun scripts/test-migrations.ts
+
+# Python bridge integration tests
+bun scripts/test-bridge-integration.ts
+```
+
+### Manual Testing
+```bash
 # Manual event test
 curl -X POST http://localhost:4000/events \
   -H "Content-Type: application/json" \
@@ -320,7 +411,24 @@ curl -X POST http://localhost:4000/events \
     "hook_event_type": "PreToolUse",
     "payload": {"tool_name": "Bash", "tool_input": {"command": "ls"}}
   }'
+
+# Test bridge status
+curl http://localhost:4000/api/usage/bridge/status
+
+# Test usage statistics
+curl "http://localhost:4000/api/usage/stats?plan=pro&theme=dark"
+
+# Test usage sessions
+curl "http://localhost:4000/api/usage/sessions?hours_back=24&limit=10"
 ```
+
+### Test Coverage
+- ✅ **Event Processing** - Event validation, storage, and WebSocket broadcasting
+- ✅ **Usage API** - All usage endpoints with parameter validation and error handling
+- ✅ **Bridge Integration** - Proxy functionality, fallback mechanisms, and health monitoring
+- ✅ **Database Migrations** - Schema evolution, rollback, and data integrity
+- ✅ **WebSocket Communication** - Real-time updates for events and usage data
+- ✅ **Error Scenarios** - Bridge failures, validation errors, and timeout handling
 
 ## ⚙️ Configuration
 
@@ -334,6 +442,12 @@ Copy `.env.sample` to `.env` in the project root and fill in your API keys:
 - `GEMINI_API_KEY` – Google Gemini API key (optional)
 - `OPENAI_API_KEY` – OpenAI API key (optional)
 - `ELEVEN_API_KEY` – ElevenLabs API key (optional)
+
+**Python Bridge Configuration** (optional, for usage monitoring):
+- `USAGE_BRIDGE_URL=http://localhost:8001` – Python bridge service URL
+- `USAGE_BRIDGE_TIMEOUT=5000` – Request timeout in milliseconds
+- `USAGE_BRIDGE_RETRIES=2` – Number of retry attempts
+- `USAGE_BRIDGE_ENABLED=true` – Enable/disable bridge integration
 
 **Client** (`.env` file in `apps/client/.env`):
 - `VITE_MAX_EVENTS_TO_DISPLAY=100` – Maximum events to show (removes oldest when exceeded)
@@ -352,10 +466,13 @@ Copy `.env.sample` to `.env` in the project root and fill in your API keys:
 
 ## 📊 Technical Stack
 
-- **Server**: Bun, TypeScript, SQLite
+- **Server**: Bun, TypeScript, SQLite with WAL mode, Migration system
 - **Client**: Vue 3, TypeScript, Vite, Tailwind CSS
 - **Hooks**: Python 3.8+, Astral uv, TTS (ElevenLabs or OpenAI), LLMs (Claude or OpenAI)
-- **Communication**: HTTP REST, WebSocket
+- **Bridge Integration**: Python FastAPI proxy, intelligent fallback, retry logic
+- **Communication**: HTTP REST, WebSocket (events + usage updates)
+- **Database**: SQLite with automatic migrations, usage tracking, session correlation
+- **Monitoring**: Real-time usage stats, bridge health monitoring, error handling
 
 ## 🔧 Troubleshooting
 

@@ -7,7 +7,23 @@ import json
 import os
 import sys
 from pathlib import Path
-from utils.constants import ensure_session_log_dir
+
+# Import utils.constants with proper path resolution
+script_dir = Path(__file__).parent
+sys.path.insert(0, str(script_dir))
+
+try:
+    from utils.constants import ensure_session_log_dir
+except ImportError:
+    # Fallback implementation if utils.constants is not available
+    def ensure_session_log_dir(session_id: str) -> Path:
+        """
+        Fallback implementation for ensure_session_log_dir.
+        """
+        log_base_dir = os.environ.get("CLAUDE_HOOKS_LOG_DIR", "logs")
+        log_dir = Path(log_base_dir) / session_id
+        log_dir.mkdir(parents=True, exist_ok=True)
+        return log_dir
 
 def main():
     try:
