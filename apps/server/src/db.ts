@@ -1,7 +1,9 @@
 import { Database } from 'bun:sqlite';
-import type { HookEvent, FilterOptions, Theme, ThemeSearchQuery } from './types';
+import type { HookEvent, FilterOptions, Theme, ThemeSearchQuery, UsageConfig, UsageSnapshot } from './types';
+import { MigrationRunner } from './migrations';
 
 let db: Database;
+let migrationRunner: MigrationRunner;
 
 export function initDatabase(): void {
   db = new Database('events.db');
@@ -9,6 +11,7 @@ export function initDatabase(): void {
   // Enable WAL mode for better concurrent performance
   db.exec('PRAGMA journal_mode = WAL');
   db.exec('PRAGMA synchronous = NORMAL');
+  db.exec('PRAGMA foreign_keys = ON');  // Enable foreign key constraints
   
   // Create events table
   db.exec(`
@@ -102,6 +105,13 @@ export function initDatabase(): void {
   db.exec('CREATE INDEX IF NOT EXISTS idx_themes_createdAt ON themes(createdAt)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_theme_shares_token ON theme_shares(shareToken)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_theme_ratings_theme ON theme_ratings(themeId)');
+
+  // Initialize and run migrations
+  migrationRunner = new MigrationRunner(db);
+  migrationRunner.migrate().catch(error => {
+    console.error('❌ Migration failed:', error);
+    throw error;
+  });
 }
 
 export function insertEvent(event: HookEvent): HookEvent {
@@ -315,4 +325,211 @@ export function incrementThemeDownloadCount(id: string): boolean {
   const stmt = db.prepare('UPDATE themes SET downloadCount = downloadCount + 1 WHERE id = ?');
   const result = stmt.run(id);
   return result.changes > 0;
+}
+
+// Usage configuration functions
+export function getUsageConfig(): UsageConfig | null {
+  try {
+    const stmt = db.prepare('SELECT * FROM usage_config WHERE is_active = 1 LIMIT 1');
+    const row = stmt.get() as any;
+    
+    if (!row) return null;
+    
+    return {
+      id: row.id,
+      plan: row.plan,
+      custom_limit_tokens: row.custom_limit_tokens,
+      view: row.view,
+      timezone: row.timezone,
+      time_format: row.time_format,
+      theme: row.theme,
+      refresh_rate: row.refresh_rate,
+      refresh_per_second: row.refresh_per_second,
+      reset_hour: row.reset_hour,
+      created_at: row.created_at,
+      updated_at: row.updated_at
+    };
+  } catch (error) {
+    console.error('Error getting usage config:', error);
+    return null;
+  }
+}
+
+export function updateUsageConfig(updates: Partial<UsageConfig>): boolean {
+  try {
+    const allowedFields = [
+      'plan', 'custom_limit_tokens', 'view', 'timezone', 'time_format', 
+      'theme', 'refresh_rate', 'refresh_per_second', 'reset_hour'
+    ];
+    
+    const setFields = Object.keys(updates)
+      .filter(key => allowedFields.includes(key) && updates[key as keyof UsageConfig] !== undefined)
+      .map(key => `${key} = ?`)
+      .join(', ');
+    
+    if (!setFields) return false;
+    
+    const values = Object.keys(updates)
+      .filter(key => allowedFields.includes(key) && updates[key as keyof UsageConfig] !== undefined)
+      .map(key => updates[key as keyof UsageConfig]);
+    
+    // Always update the timestamp
+    const sql = `UPDATE usage_config SET ${setFields}, updated_at = unixepoch() WHERE is_active = 1`;
+    const stmt = db.prepare(sql);
+    const result = stmt.run(...values);
+    
+    return result.changes > 0;
+  } catch (error) {
+    console.error('Error updating usage config:', error);
+    return false;
+  }
+}
+
+export function resetUsageConfig(): boolean {
+  try {
+    const stmt = db.prepare(`
+      UPDATE usage_config 
+      SET plan = 'custom', 
+          view = 'realtime', 
+          timezone = 'auto', 
+          time_format = 'auto', 
+          theme = 'auto', 
+          refresh_rate = 10, 
+          refresh_per_second = 0.75, 
+          reset_hour = NULL,
+          custom_limit_tokens = NULL,
+          updated_at = unixepoch()
+      WHERE is_active = 1
+    `);
+    const result = stmt.run();
+    return result.changes > 0;
+  } catch (error) {
+    console.error('Error resetting usage config:', error);
+    return false;
+  }
+}
+
+// Usage snapshot functions
+export function insertUsageSnapshot(snapshot: Omit<UsageSnapshot, 'id'>): UsageSnapshot | null {
+  try {
+    const stmt = db.prepare(`
+      INSERT INTO usage_snapshots (session_id, snapshot_data, snapshot_type, timestamp)
+      VALUES (?, ?, ?, ?)
+    `);
+    
+    const timestamp = snapshot.timestamp || Date.now();
+    const result = stmt.run(
+      snapshot.session_id,
+      snapshot.snapshot_data,
+      snapshot.snapshot_type,
+      timestamp
+    );
+    
+    return {
+      id: result.lastInsertRowid as number,
+      ...snapshot,
+      timestamp
+    };
+  } catch (error) {
+    console.error('Error inserting usage snapshot:', error);
+    return null;
+  }
+}
+
+export function getUsageSnapshots(
+  sessionId?: string, 
+  limit: number = 100, 
+  hoursBack: number = 24
+): UsageSnapshot[] {
+  try {
+    let sql = `
+      SELECT id, session_id, snapshot_data, snapshot_type, timestamp
+      FROM usage_snapshots
+      WHERE timestamp >= ?
+    `;
+    const params: any[] = [Date.now() - (hoursBack * 60 * 60 * 1000)];
+    
+    if (sessionId) {
+      sql += ' AND session_id = ?';
+      params.push(sessionId);
+    }
+    
+    sql += ' ORDER BY timestamp DESC LIMIT ?';
+    params.push(limit);
+    
+    const stmt = db.prepare(sql);
+    const rows = stmt.all(...params) as any[];
+    
+    return rows.map(row => ({
+      id: row.id,
+      session_id: row.session_id,
+      snapshot_data: row.snapshot_data,
+      snapshot_type: row.snapshot_type,
+      timestamp: row.timestamp
+    }));
+  } catch (error) {
+    console.error('Error getting usage snapshots:', error);
+    return [];
+  }
+}
+
+export function getUsageSnapshotsBySession(sessionId: string): UsageSnapshot[] {
+  try {
+    const stmt = db.prepare(`
+      SELECT id, session_id, snapshot_data, snapshot_type, timestamp
+      FROM usage_snapshots
+      WHERE session_id = ?
+      ORDER BY timestamp DESC
+    `);
+    
+    const rows = stmt.all(sessionId) as any[];
+    
+    return rows.map(row => ({
+      id: row.id,
+      session_id: row.session_id,
+      snapshot_data: row.snapshot_data,
+      snapshot_type: row.snapshot_type,
+      timestamp: row.timestamp
+    }));
+  } catch (error) {
+    console.error('Error getting usage snapshots by session:', error);
+    return [];
+  }
+}
+
+export function deleteOldUsageSnapshots(daysOld: number = 30): number {
+  try {
+    const cutoffTime = Date.now() - (daysOld * 24 * 60 * 60 * 1000);
+    const stmt = db.prepare('DELETE FROM usage_snapshots WHERE timestamp < ?');
+    const result = stmt.run(cutoffTime);
+    return result.changes;
+  } catch (error) {
+    console.error('Error deleting old usage snapshots:', error);
+    return 0;
+  }
+}
+
+// Migration management functions
+export function getMigrationRunner(): MigrationRunner {
+  return migrationRunner;
+}
+
+export function getMigrationStatus() {
+  return migrationRunner ? migrationRunner.getStatus() : null;
+}
+
+export async function runMigrations(): Promise<void> {
+  if (migrationRunner) {
+    await migrationRunner.migrate();
+  }
+}
+
+export async function rollbackMigrations(targetVersion?: number): Promise<void> {
+  if (migrationRunner) {
+    await migrationRunner.rollback(targetVersion);
+  }
+}
+
+export function validateDatabase(): boolean {
+  return migrationRunner ? migrationRunner.validateDatabase() : false;
 }

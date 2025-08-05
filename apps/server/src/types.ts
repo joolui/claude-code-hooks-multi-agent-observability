@@ -181,7 +181,8 @@ export interface UsageStats {
 
 export interface UsageSnapshot {
   id?: number;
-  session_id?: string;
-  data: UsageStats;  // JSON serialized
+  session_id: string;
+  snapshot_data: string;  // JSON serialized UsageStats
+  snapshot_type: 'stats' | 'config' | 'session';
   timestamp: number;
 }
