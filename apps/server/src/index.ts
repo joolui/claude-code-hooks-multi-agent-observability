@@ -9,7 +9,14 @@ import {
   getUsageSnapshots,
   insertUsageSnapshot
 } from './db';
-import type { HookEvent, UsageConfig } from './types';
+import type { HookEvent, UsageConfig, WebSocketMessage } from './types';
+import { 
+  getBridgeUsageStats, 
+  getBridgeUsageSessions, 
+  updateBridgeUsageConfig,
+  checkBridgeHealth,
+  getBridgeStatus
+} from './bridge';
 import { 
   createTheme, 
   updateThemeById, 
@@ -26,6 +33,81 @@ initDatabase();
 
 // Store WebSocket clients
 const wsClients = new Set<any>();
+
+// Helper function to broadcast messages to all WebSocket clients
+function broadcastToClients(message: WebSocketMessage): void {
+  const messageStr = JSON.stringify(message);
+  wsClients.forEach(client => {
+    try {
+      client.send(messageStr);
+    } catch (err) {
+      // Client disconnected, remove from set
+      wsClients.delete(client);
+    }
+  });
+}
+
+// Helper function to determine if an event should trigger a usage update broadcast
+function shouldTriggerUsageUpdate(event: HookEvent): boolean {
+  // Trigger usage updates for these event types
+  const triggerEvents = [
+    'PreToolUse',      // Tool usage can affect token counts
+    'PostToolUse',     // Tool completion
+    'Stop',            // Response completion
+    'SubagentStop',    // Subagent completion
+    'UserPromptSubmit' // New user interaction
+  ];
+  
+  return triggerEvents.includes(event.hook_event_type);
+}
+
+// Helper function to broadcast usage updates
+async function broadcastUsageUpdate(sessionId: string): Promise<void> {
+  try {
+    // Get current usage stats for the session
+    const usageResult = await getBridgeUsageStats();
+    
+    if (usageResult.success && usageResult.data) {
+      const usageMessage: WebSocketMessage = {
+        type: 'usage_update',
+        data: usageResult.data,
+        timestamp: Date.now(),
+        session_id: sessionId
+      };
+      
+      broadcastToClients(usageMessage);
+      
+      // Store usage snapshot for historical data
+      if (usageResult.fromBridge && usageResult.data.current_session?.id) {
+        try {
+          insertUsageSnapshot({
+            session_id: sessionId,
+            snapshot_data: JSON.stringify(usageResult.data),
+            snapshot_type: 'stats',
+            timestamp: Date.now()
+          });
+        } catch (snapshotError) {
+          console.warn('Failed to store usage snapshot during broadcast:', snapshotError);
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Error broadcasting usage update:', error);
+    
+    // Send error message to clients
+    const errorMessage: WebSocketMessage = {
+      type: 'error',
+      data: {
+        error: 'Failed to retrieve usage update',
+        detail: error instanceof Error ? error.message : 'Unknown error'
+      },
+      timestamp: Date.now(),
+      session_id: sessionId
+    };
+    
+    broadcastToClients(errorMessage);
+  }
+}
 
 // Create Bun server with HTTP and WebSocket support
 const server = Bun.serve({
@@ -62,16 +144,19 @@ const server = Bun.serve({
         // Insert event into database
         const savedEvent = insertEvent(event);
         
-        // Broadcast to all WebSocket clients
-        const message = JSON.stringify({ type: 'event', data: savedEvent });
-        wsClients.forEach(client => {
-          try {
-            client.send(message);
-          } catch (err) {
-            // Client disconnected, remove from set
-            wsClients.delete(client);
-          }
-        });
+        // Broadcast event to all WebSocket clients
+        const eventMessage: WebSocketMessage = { 
+          type: 'event', 
+          data: savedEvent,
+          timestamp: Date.now(),
+          session_id: savedEvent.session_id
+        };
+        broadcastToClients(eventMessage);
+        
+        // If this is a session start/end event or significant milestone, also broadcast usage update
+        if (shouldTriggerUsageUpdate(event)) {
+          broadcastUsageUpdate(savedEvent.session_id);
+        }
         
         return new Response(JSON.stringify(savedEvent), {
           headers: { ...headers, 'Content-Type': 'application/json' }
@@ -280,7 +365,7 @@ const server = Bun.serve({
     
     // Usage API endpoints
     
-    // GET /api/usage/stats - Get current usage statistics with optional config parameters
+    // GET /api/usage/stats - Get current usage statistics via Python bridge proxy
     if (url.pathname === '/api/usage/stats' && req.method === 'GET') {
       try {
         // Parse query parameters for configuration override
@@ -325,61 +410,41 @@ const server = Bun.serve({
           if (hour >= 0 && hour <= 23) configOverride.reset_hour = hour;
         }
         
-        // For now, return mock usage statistics with applied configuration
-        // TODO: Integrate with Python usage-bridge service when available
-        const currentConfig = getUsageConfig();
-        const effectiveConfig = { ...currentConfig, ...configOverride };
+        // Get usage statistics from Python bridge with fallback to mock data
+        const result = await getBridgeUsageStats(configOverride);
         
-        const mockUsageStats = {
-          current_session: {
-            id: `session-${Date.now()}`,
-            start_time: Date.now() - (2 * 60 * 60 * 1000), // 2 hours ago
-            end_time: Date.now(),
-            is_active: true,
-            token_counts: {
-              input_tokens: 1250,
-              output_tokens: 850,
-              cache_creation_tokens: 0,
-              cache_read_tokens: 200,
-              total_tokens: 2300
-            },
-            cost_usd: 0.034,
-            burn_rate: {
-              tokens_per_minute: 19.2,
-              cost_per_hour: 0.61
-            },
-            models: ['claude-3-5-sonnet-20241022'],
-            sent_messages_count: 12,
-            per_model_stats: {
-              'claude-3-5-sonnet-20241022': {
-                tokens: 2300,
-                cost: 0.034,
-                messages: 12
-              }
-            }
-          },
-          recent_sessions: [],
-          predictions: {
-            tokens_run_out: effectiveConfig?.plan === 'custom' && effectiveConfig?.custom_limit_tokens 
-              ? Date.now() + (8 * 60 * 60 * 1000) // 8 hours from now
-              : null,
-            limit_resets_at: Date.now() + (22 * 60 * 60 * 1000) // 22 hours from now (daily reset)
-          },
-          burn_rate: {
-            tokens_per_minute: 19.2,
-            cost_per_hour: 0.61
-          },
-          totals: {
-            cost_percentage: effectiveConfig?.plan === 'pro' ? 68.0 : 34.0,
-            token_percentage: effectiveConfig?.plan === 'pro' ? 72.5 : 46.0,
-            message_percentage: 15.0,
-            time_to_reset_percentage: 8.3
-          },
-          config_applied: effectiveConfig
-        };
+        if (!result.success) {
+          console.error('Bridge error:', result.error);
+          return new Response(JSON.stringify({ 
+            error: 'Failed to retrieve usage statistics',
+            detail: result.error,
+            fromBridge: result.fromBridge
+          }), {
+            status: result.status || 500,
+            headers: { ...headers, 'Content-Type': 'application/json' }
+          });
+        }
         
-        return new Response(JSON.stringify(mockUsageStats), {
-          headers: { ...headers, 'Content-Type': 'application/json' }
+        // Store snapshot if data came from bridge
+        if (result.fromBridge && result.data?.current_session?.id) {
+          try {
+            insertUsageSnapshot({
+              session_id: result.data.current_session.id,
+              snapshot_data: JSON.stringify(result.data),
+              snapshot_type: 'stats',
+              timestamp: Date.now()
+            });
+          } catch (snapshotError) {
+            console.warn('Failed to store usage snapshot:', snapshotError);
+          }
+        }
+        
+        return new Response(JSON.stringify(result.data), {
+          headers: { 
+            ...headers, 
+            'Content-Type': 'application/json',
+            'X-Data-Source': result.fromBridge ? 'bridge' : 'mock'
+          }
         });
       } catch (error) {
         console.error('Error getting usage stats:', error);
@@ -422,7 +487,32 @@ const server = Bun.serve({
       }
     }
     
-    // POST /api/usage/config - Update usage configuration
+    // GET /api/usage/bridge/status - Get Python bridge status
+    if (url.pathname === '/api/usage/bridge/status' && req.method === 'GET') {
+      try {
+        const isHealthy = await checkBridgeHealth();
+        const status = getBridgeStatus();
+        
+        return new Response(JSON.stringify({
+          ...status,
+          healthy: isHealthy,
+          timestamp: Date.now()
+        }), {
+          headers: { ...headers, 'Content-Type': 'application/json' }
+        });
+      } catch (error) {
+        console.error('Error checking bridge status:', error);
+        return new Response(JSON.stringify({ 
+          error: 'Failed to check bridge status',
+          detail: error instanceof Error ? error.message : 'Unknown error'
+        }), {
+          status: 500,
+          headers: { ...headers, 'Content-Type': 'application/json' }
+        });
+      }
+    }
+    
+    // POST /api/usage/config - Update usage configuration via bridge and local database
     if (url.pathname === '/api/usage/config' && req.method === 'POST') {
       try {
         const updates: Partial<UsageConfig> = await req.json();
@@ -480,7 +570,28 @@ const server = Bun.serve({
           });
         }
         
-        // Update the configuration
+        // Try to update configuration via Python bridge first
+        const bridgeResult = await updateBridgeUsageConfig(updates);
+        
+        if (bridgeResult.success && bridgeResult.data) {
+          // Bridge update succeeded, also update local database
+          const localSuccess = updateUsageConfig(updates);
+          if (!localSuccess) {
+            console.warn('Bridge config updated but local database update failed');
+          }
+          
+          return new Response(JSON.stringify({
+            success: true,
+            message: 'Configuration updated successfully via bridge',
+            data: bridgeResult.data.data,
+            fromBridge: true
+          }), {
+            headers: { ...headers, 'Content-Type': 'application/json' }
+          });
+        }
+        
+        // Bridge failed or unavailable, update local database only
+        console.log('Bridge unavailable, updating local configuration only');
         const success = updateUsageConfig(updates);
         if (!success) {
           return new Response(JSON.stringify({ 
@@ -496,8 +607,9 @@ const server = Bun.serve({
         const updatedConfig = getUsageConfig();
         return new Response(JSON.stringify({
           success: true,
-          message: 'Configuration updated successfully',
-          data: updatedConfig
+          message: 'Configuration updated successfully (local only)',
+          data: updatedConfig,
+          fromBridge: false
         }), {
           headers: { ...headers, 'Content-Type': 'application/json' }
         });
@@ -513,7 +625,7 @@ const server = Bun.serve({
       }
     }
     
-    // GET /api/usage/sessions - Get usage session history
+    // GET /api/usage/sessions - Get usage session history via Python bridge proxy
     if (url.pathname === '/api/usage/sessions' && req.method === 'GET') {
       try {
         const hoursBack = parseInt(url.searchParams.get('hours_back') || '24');
@@ -541,7 +653,21 @@ const server = Bun.serve({
           });
         }
         
-        // Get usage snapshots from database
+        // Try to get sessions from Python bridge first
+        const bridgeResult = await getBridgeUsageSessions(sessionId, limit, hoursBack);
+        
+        if (bridgeResult.success && bridgeResult.data) {
+          return new Response(JSON.stringify(bridgeResult.data), {
+            headers: { 
+              ...headers, 
+              'Content-Type': 'application/json',
+              'X-Data-Source': bridgeResult.fromBridge ? 'bridge' : 'mock'
+            }
+          });
+        }
+        
+        // Fallback to local database if bridge is unavailable
+        console.log('Bridge unavailable, falling back to local snapshots');
         const snapshots = getUsageSnapshots(sessionId, limit, hoursBack);
         
         // Transform snapshots to session format
@@ -575,7 +701,11 @@ const server = Bun.serve({
           limit: limit,
           session_id: sessionId || null
         }), {
-          headers: { ...headers, 'Content-Type': 'application/json' }
+          headers: { 
+            ...headers, 
+            'Content-Type': 'application/json',
+            'X-Data-Source': 'database'
+          }
         });
       } catch (error) {
         console.error('Error getting usage sessions:', error);
@@ -638,18 +768,58 @@ const server = Bun.serve({
   },
   
   websocket: {
-    open(ws) {
+    async open(ws) {
       console.log('WebSocket client connected');
       wsClients.add(ws);
       
       // Send recent events on connection
       const events = getRecentEvents(50);
-      ws.send(JSON.stringify({ type: 'initial', data: events }));
+      const initialMessage: WebSocketMessage = {
+        type: 'initial',
+        data: { events },
+        timestamp: Date.now()
+      };
+      ws.send(JSON.stringify(initialMessage));
+      
+      // Also send current usage stats if available
+      try {
+        const usageResult = await getBridgeUsageStats();
+        if (usageResult.success && usageResult.data) {
+          const usageMessage: WebSocketMessage = {
+            type: 'usage_update',
+            data: usageResult.data,
+            timestamp: Date.now()
+          };
+          ws.send(JSON.stringify(usageMessage));
+        }
+      } catch (error) {
+        console.warn('Failed to send initial usage data:', error);
+      }
     },
     
-    message(ws, message) {
-      // Handle any client messages if needed
-      console.log('Received message:', message);
+    async message(ws, message) {
+      try {
+        const parsedMessage = JSON.parse(message.toString());
+        console.log('Received WebSocket message:', parsedMessage);
+        
+        // Handle client requests for usage updates
+        if (parsedMessage.type === 'request_usage_update') {
+          const sessionId = parsedMessage.session_id;
+          await broadcastUsageUpdate(sessionId || 'unknown');
+        }
+        
+        // Handle ping/pong for connection health
+        if (parsedMessage.type === 'ping') {
+          const pongMessage: WebSocketMessage = {
+            type: 'pong',
+            data: { timestamp: Date.now() },
+            timestamp: Date.now()
+          };
+          ws.send(JSON.stringify(pongMessage));
+        }
+      } catch (error) {
+        console.error('Error parsing WebSocket message:', error);
+      }
     },
     
     close(ws) {
@@ -667,9 +837,16 @@ const server = Bun.serve({
 console.log(`🚀 Server running on http://localhost:${server.port}`);
 console.log(`📊 WebSocket endpoint: ws://localhost:${server.port}/stream`);
 console.log(`📮 POST events to: http://localhost:${server.port}/events`);
-console.log(`⚡ Usage API endpoints:`);
-console.log(`   GET  /api/usage/stats - Current usage statistics`);
+console.log(`⚡ Usage API endpoints (with Python bridge integration):`);
+console.log(`   GET  /api/usage/stats - Current usage statistics (proxied to bridge)`);
 console.log(`   GET  /api/usage/config - Usage configuration`);
-console.log(`   POST /api/usage/config - Update configuration`);
+console.log(`   POST /api/usage/config - Update configuration (bridge + local)`);
 console.log(`   POST /api/usage/config/reset - Reset configuration`);
-console.log(`   GET  /api/usage/sessions - Session history`);
+console.log(`   GET  /api/usage/sessions - Session history (bridge + fallback)`);
+console.log(`   GET  /api/usage/bridge/status - Python bridge health status`);
+console.log(`🌉 Python bridge: ${getBridgeStatus().enabled ? getBridgeStatus().url : 'disabled'}`);
+
+// Check bridge health on startup
+checkBridgeHealth().then(isHealthy => {
+  console.log(`🔗 Bridge status: ${isHealthy ? '✅ healthy' : '❌ unavailable'}`);
+});

@@ -186,3 +186,58 @@ export interface UsageSnapshot {
   snapshot_type: 'stats' | 'config' | 'session';
   timestamp: number;
 }
+
+// Additional usage data types for Python bridge integration
+export interface PythonBridgeConfig {
+  url: string;
+  timeout: number;
+  retries: number;
+  enabled: boolean;
+}
+
+export interface UsageStatsResponse {
+  current_session?: SessionBlock;
+  recent_sessions: SessionBlock[];
+  predictions: UsagePredictions;
+  burn_rate: BurnRate;
+  totals: UsageTotals;
+  config_applied?: Partial<UsageConfig>;
+}
+
+export interface UsageSessionsResponse {
+  sessions: Array<{
+    id: number;
+    session_id: string;
+    snapshot_type: string;
+    timestamp: number;
+    data: any;
+    error?: string;
+  }>;
+  total_count: number;
+  hours_back: number;
+  limit: number;
+  session_id: string | null;
+}
+
+export interface WebSocketMessage {
+  type: 'event' | 'usage_update' | 'initial' | 'error';
+  data: any;
+  timestamp?: number;
+  session_id?: string;
+}
+
+export interface ProxyRequestOptions {
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  path: string;
+  body?: any;
+  params?: Record<string, string>;
+  timeout?: number;
+}
+
+export interface ProxyResponse<T = any> {
+  success: boolean;
+  data?: T;
+  error?: string;
+  status: number;
+  fromBridge: boolean;
+}
