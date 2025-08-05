@@ -38,29 +38,50 @@ def get_completion_messages():
 def get_tts_script_path():
     """
     Determine which TTS script to use based on available API keys.
-    Priority order: ElevenLabs > OpenAI > pyttsx3
+    Priority order: Rime > Google Cloud > ElevenLabs > OpenAI > pyttsx3
     """
     # Get current script directory and construct utils/tts path
     script_dir = Path(__file__).parent
     tts_dir = script_dir / "utils" / "tts"
-
-    # Check for ElevenLabs API key (highest priority)
-    if os.getenv("ELEVENLABS_API_KEY"):
+    
+    # Check for Rime API key (highest priority)
+    if os.getenv('RIME_API_KEY'):
+        rime_script = tts_dir / "rime_tts.py"
+        if rime_script.exists():
+            return str(rime_script)
+    
+    # Check for Google Cloud TTS (second priority)
+    # Google Cloud can use gcloud auth or GOOGLE_APPLICATION_CREDENTIALS
+    try:
+        import subprocess
+        result = subprocess.run(
+            ['gcloud', 'auth', 'print-access-token'],
+            capture_output=True, timeout=5
+        )
+        if result.returncode == 0 or os.getenv('GOOGLE_APPLICATION_CREDENTIALS'):
+            google_cloud_script = tts_dir / "google_cloud_tts.py"
+            if google_cloud_script.exists():
+                return str(google_cloud_script)
+    except:
+        pass  # gcloud not available or not authenticated
+    
+    # Check for ElevenLabs API key (third priority)
+    if os.getenv('ELEVENLABS_API_KEY'):
         elevenlabs_script = tts_dir / "elevenlabs_tts.py"
         if elevenlabs_script.exists():
             return str(elevenlabs_script)
-
-    # Check for OpenAI API key (second priority)
-    if os.getenv("OPENAI_API_KEY"):
+    
+    # Check for OpenAI API key (fourth priority)
+    if os.getenv('OPENAI_API_KEY'):
         openai_script = tts_dir / "openai_tts.py"
         if openai_script.exists():
             return str(openai_script)
-
+    
     # Fall back to pyttsx3 (no API key required)
     pyttsx3_script = tts_dir / "pyttsx3_tts.py"
     if pyttsx3_script.exists():
         return str(pyttsx3_script)
-
+    
     return None
 
 
@@ -68,7 +89,7 @@ def get_llm_completion_message():
     """
     Generate completion message using available LLM services.
     Priority order: OpenAI > Anthropic > fallback to random message
-
+    
     Returns:
         str: Generated or fallback completion message
     """
@@ -107,11 +128,10 @@ def get_llm_completion_message():
                     return result.stdout.strip()
             except (subprocess.TimeoutExpired, subprocess.SubprocessError):
                 pass
-
+    
     # Fallback to random predefined message
     messages = get_completion_messages()
     return random.choice(messages)
-
 
 def announce_completion():
     """Announce completion using the best available TTS service."""
@@ -119,17 +139,17 @@ def announce_completion():
         tts_script = get_tts_script_path()
         if not tts_script:
             return  # No TTS scripts available
-
+        
         # Get completion message (LLM-generated or fallback)
         completion_message = get_llm_completion_message()
-
+        
         # Call the TTS script with the completion message
         subprocess.run(
             ["uv", "run", tts_script, completion_message],
             capture_output=True,  # Suppress output
             timeout=10,  # 10-second timeout
         )
-
+        
     except (subprocess.TimeoutExpired, subprocess.SubprocessError, FileNotFoundError):
         # Fail silently if TTS encounters issues
         pass
@@ -146,7 +166,7 @@ def main():
             "--chat", action="store_true", help="Copy transcript to chat.json"
         )
         args = parser.parse_args()
-
+        
         # Read JSON input from stdin
         input_data = json.load(sys.stdin)
 
@@ -167,14 +187,14 @@ def main():
                     log_data = []
         else:
             log_data = []
-
+        
         # Append new data
         log_data.append(input_data)
-
+        
         # Write back to file with formatting
         with open(log_path, "w") as f:
             json.dump(log_data, f, indent=2)
-
+        
         # Handle --chat switch
         if args.chat and "transcript_path" in input_data:
             transcript_path = input_data["transcript_path"]
@@ -190,7 +210,7 @@ def main():
                                     chat_data.append(json.loads(line))
                                 except json.JSONDecodeError:
                                     pass  # Skip invalid lines
-
+                    
                     # Write to logs/chat.json
                     chat_file = os.path.join(log_dir, "chat.json")
                     with open(chat_file, "w") as f:

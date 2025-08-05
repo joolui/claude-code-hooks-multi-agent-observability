@@ -19,3 +19,5 @@ This command loads essential context for a new agent session by examining the co
 - Documentation: 
   - @ai_docs/cc_hooks_docs.md
   - @ai_docs/uv-single-file-scripts.md
+
+When you finish run the tts summary agent, and let the user know you're ready to build.
