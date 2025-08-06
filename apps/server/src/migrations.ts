@@ -81,8 +81,7 @@ export class MigrationRunner {
             session_id TEXT NOT NULL,
             snapshot_data TEXT NOT NULL,
             snapshot_type TEXT NOT NULL DEFAULT 'stats' CHECK (snapshot_type IN ('stats', 'config', 'session')),
-            timestamp INTEGER NOT NULL DEFAULT (unixepoch()),
-            FOREIGN KEY (session_id) REFERENCES events (session_id) ON DELETE CASCADE
+            timestamp INTEGER NOT NULL DEFAULT (unixepoch())
           )
         `);
 

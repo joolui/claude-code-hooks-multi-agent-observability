@@ -1,5 +1,5 @@
 <template>
-  <div class="bg-gradient-to-r from-[var(--theme-bg-primary)] to-[var(--theme-bg-secondary)] border-b-2 border-[var(--theme-primary)] px-4 py-6 shadow-lg">
+  <div class="max-h-96 overflow-y-auto bg-gradient-to-r from-[var(--theme-bg-primary)] to-[var(--theme-bg-secondary)] border-b-2 border-[var(--theme-primary)] px-4 py-6 shadow-lg">
     <h2 class="text-xl font-bold text-[var(--theme-primary)] mb-6 drop-shadow-sm">
       Usage Configuration
     </h2>
@@ -241,8 +241,21 @@ interface Config {
 const usageConfig = useUsageConfig()
 
 // Create a reactive config that mirrors the composable
-const config = computed({
-  get: () => ({
+const config = ref<Config>({
+  plan: 'custom',
+  customTokenLimit: 200000,
+  customMessageLimit: 1500,
+  customCostLimit: 25.00,
+  viewMode: 'realtime',
+  timezone: 'auto',
+  timeFormat: '24h',
+  refreshRate: 10,
+  dailyResetHour: 0
+})
+
+// Initialize config from composable
+onMounted(() => {
+  config.value = {
     plan: usageConfig.config.value.plan,
     customTokenLimit: usageConfig.config.value.customTokenLimit,
     customMessageLimit: usageConfig.config.value.customMessageLimit,
@@ -252,19 +265,6 @@ const config = computed({
     timeFormat: usageConfig.config.value.timeFormat,
     refreshRate: usageConfig.config.value.refreshRate / 1000, // Convert from ms to seconds for UI
     dailyResetHour: usageConfig.config.value.dailyResetHour
-  }),
-  set: (value) => {
-    usageConfig.updateConfig({
-      plan: value.plan,
-      customTokenLimit: value.customTokenLimit,
-      customMessageLimit: value.customMessageLimit,
-      customCostLimit: value.customCostLimit,
-      viewMode: value.viewMode,
-      timezone: value.timezone,
-      timeFormat: value.timeFormat,
-      refreshRate: value.refreshRate * 1000, // Convert from seconds to ms
-      dailyResetHour: value.dailyResetHour
-    })
   }
 })
 
@@ -319,6 +319,19 @@ const saveConfig = async () => {
   showSuccessMessage.value = false
   
   try {
+    // Update the composable with current form values
+    usageConfig.updateConfig({
+      plan: config.value.plan,
+      customTokenLimit: config.value.customTokenLimit,
+      customMessageLimit: config.value.customMessageLimit,
+      customCostLimit: config.value.customCostLimit,
+      viewMode: config.value.viewMode,
+      timezone: config.value.timezone,
+      timeFormat: config.value.timeFormat,
+      refreshRate: config.value.refreshRate * 1000, // Convert from seconds to ms
+      dailyResetHour: config.value.dailyResetHour
+    })
+    
     // Use the composable's save method
     const success = usageConfig.validateAndSave()
     
@@ -338,12 +351,14 @@ const saveConfig = async () => {
 
 const resetToDefaults = () => {
   config.value = {
-    plan: 'pro',
-    customTokenLimit: 10000,
+    plan: 'custom',
+    customTokenLimit: 200000,
+    customMessageLimit: 1500,
+    customCostLimit: 25.00,
     viewMode: 'realtime',
     timezone: 'auto',
     timeFormat: '24h',
-    refreshRate: 5,
+    refreshRate: 10,
     dailyResetHour: 0
   }
 }
@@ -372,13 +387,6 @@ const loadConfig = () => {
     console.error('Failed to load configuration:', error)
   }
 }
-
-// Auto-save configuration changes
-watch(config, (newConfig) => {
-  if (isFormValid.value) {
-    localStorage.setItem('usageConfig', JSON.stringify(newConfig))
-  }
-}, { deep: true })
 
 onMounted(() => {
   loadConfig()
