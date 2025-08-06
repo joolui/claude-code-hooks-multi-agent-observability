@@ -329,9 +329,25 @@ class ClaudeMonitorWrapper:
             data_manager = self.create_data_manager(settings)
             orchestrator = self.create_orchestrator(data_manager, settings)
 
-            # Update and get current data
-            orchestrator.update()
-            current_data = orchestrator.get_current_data()
+            # Get current data (some versions may need refresh/update first)
+            # Try different methods to get/refresh data
+            if hasattr(orchestrator, 'refresh'):
+                orchestrator.refresh()
+            elif hasattr(orchestrator, 'update_data'):
+                orchestrator.update_data()
+            elif hasattr(orchestrator, 'load_data'):
+                orchestrator.load_data()
+            
+            # Get current data using available method
+            if hasattr(orchestrator, 'get_current_data'):
+                current_data = orchestrator.get_current_data()
+            elif hasattr(orchestrator, 'current_data'):
+                current_data = orchestrator.current_data
+            elif hasattr(orchestrator, 'get_data'):
+                current_data = orchestrator.get_data()
+            else:
+                # Fallback - try to get data from data_manager directly
+                current_data = data_manager
 
             # Build usage stats response
             usage_stats = UsageStats(

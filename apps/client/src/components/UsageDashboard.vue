@@ -190,70 +190,84 @@ const isConnected = computed(() => usageDataComposable.isConnected.value || lega
 const error = computed(() => usageDataComposable.error.value || legacyError.value)
 const loading = computed(() => usageDataComposable.isLoading.value || legacyLoading.value)
 
-// Reactive data
-const usageMetrics = ref<UsageMetric[]>([
-  {
-    id: 'tokens',
-    label: 'Token Usage',
-    value: 15420,
-    unit: 'tokens',
-    trend: 'up',
-    percentage: 65,
-    emoji: '🔤',
-    subtitle: 'This hour'
-  },
-  {
-    id: 'requests',
-    label: 'API Requests',
-    value: 1247,
-    unit: 'req/min',
-    trend: 'stable',
-    percentage: 42,
-    emoji: '📡',
-    subtitle: 'Current rate'
-  },
-  {
-    id: 'sessions',
-    label: 'Active Sessions',
-    value: 23,
-    unit: 'sessions',
-    trend: 'down',
-    percentage: 23,
-    emoji: '👥',
-    subtitle: 'Right now'
-  },
-  {
-    id: 'response_time',
-    label: 'Response Time',
-    value: 145,
-    unit: 'ms',
-    trend: 'stable',
-    percentage: 14,
-    emoji: '⚡',
-    subtitle: 'Average'
-  }
-])
-
-const summaryStats = ref<SummaryStats>({
-  activeSessions: 23,
-  totalRequests: 45632,
-  uptime: '99.9%'
+// Reactive data - computed from real usage data
+const usageMetrics = computed<UsageMetric[]>(() => {
+  const currentStats = usageDataComposable.state.currentStats
+  const realTimeMetrics = usageDataComposable.state.realTimeMetrics
+  
+  return [
+    {
+      id: 'tokens',
+      label: 'Token Usage',
+      value: currentStats?.tokensUsed || 0,
+      unit: 'tokens',
+      trend: currentStats?.tokensPercentage > 50 ? 'up' : currentStats?.tokensPercentage > 20 ? 'stable' : 'down',
+      percentage: currentStats?.tokensPercentage || 0,
+      emoji: '🔤',
+      subtitle: `${currentStats?.tokenLimit || 0} limit`
+    },
+    {
+      id: 'requests',
+      label: 'API Requests', 
+      value: realTimeMetrics?.requestsPerMinute || 0,
+      unit: 'req/min',
+      trend: 'stable',
+      percentage: currentStats?.messagesPercentage || 0,
+      emoji: '📡',
+      subtitle: 'Current rate'
+    },
+    {
+      id: 'sessions',
+      label: 'Active Sessions',
+      value: realTimeMetrics?.activeSessions || 0,
+      unit: 'sessions',
+      trend: 'stable',
+      percentage: 0,
+      emoji: '👥',
+      subtitle: 'Right now'
+    },
+    {
+      id: 'response_time',
+      label: 'Response Time',
+      value: realTimeMetrics?.averageResponseTime || 0,
+      unit: 'ms',
+      trend: 'stable',
+      percentage: 0,
+      emoji: '⚡',
+      subtitle: 'Average'
+    }
+  ]
 })
 
-const planInfo = ref<PlanInfo>({
-  planName: 'Pro Plan',
-  tokensUsed: 65420,
-  tokenLimit: 200000,
-  tokenUsagePercentage: 32.7,
-  daysRemaining: 18,
-  billingProgress: 40,
-  resetDate: 'Dec 1, 2024'
+const summaryStats = computed<SummaryStats>(() => {
+  const realTimeMetrics = usageDataComposable.state.realTimeMetrics
+  const currentStats = usageDataComposable.state.currentStats
+  
+  return {
+    activeSessions: realTimeMetrics?.activeSessions || 0,
+    totalRequests: currentStats?.messagesUsed || 0,
+    uptime: realTimeMetrics?.uptime || 'N/A'
+  }
+})
+
+const planInfo = computed<PlanInfo>(() => {
+  const currentStats = usageDataComposable.state.currentStats
+  const planData = usageDataComposable.state.planInfo
+  
+  return {
+    planName: planData?.planName || 'Custom Plan',
+    tokensUsed: currentStats?.tokensUsed || 0,
+    tokenLimit: currentStats?.tokenLimit || 200000,
+    tokenUsagePercentage: currentStats?.tokensPercentage || 0,
+    daysRemaining: currentStats?.daysRemaining || 30,
+    billingProgress: (currentStats?.daysRemaining || 30) > 15 ? 100 - ((currentStats?.daysRemaining || 30) / 30 * 100) : 50,
+    resetDate: currentStats?.resetDate ? new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(currentStats.resetDate) : 'N/A'
+  }
 })
 
 // Computed data for progress bars using new composables
 const costUsageData = computed(() => {
-  const currentStats = usageDataComposable.currentStats.value
-  const currentPlan = usageConfig.currentPlan.value
+  const currentStats = usageDataComposable.state.currentStats
   
   if (currentStats) {
     return {
@@ -266,14 +280,13 @@ const costUsageData = computed(() => {
   // Fallback to demo data
   return {
     current: 15.75,
-    limit: currentPlan.cost,
+    limit: 25.00,
     percentage: 63.0
   }
 })
 
 const tokenUsageData = computed(() => {
-  const currentStats = usageDataComposable.currentStats.value
-  const currentPlan = usageConfig.currentPlan.value
+  const currentStats = usageDataComposable.state.currentStats
   
   if (currentStats) {
     return {
@@ -286,14 +299,13 @@ const tokenUsageData = computed(() => {
   // Fallback to plan info or demo data
   return {
     current: planInfo.value.tokensUsed,
-    limit: currentPlan.tokens,
+    limit: planInfo.value.tokenLimit,
     percentage: planInfo.value.tokenUsagePercentage
   }
 })
 
 const messagesUsageData = computed(() => {
-  const currentStats = usageDataComposable.currentStats.value
-  const currentPlan = usageConfig.currentPlan.value
+  const currentStats = usageDataComposable.state.currentStats
   
   if (currentStats) {
     return {
@@ -306,13 +318,13 @@ const messagesUsageData = computed(() => {
   // Fallback to demo data
   return {
     current: 847,
-    limit: currentPlan.messages,
+    limit: 1500,
     percentage: 56.5
   }
 })
 
 const timeToResetData = computed(() => {
-  const currentStats = usageDataComposable.currentStats.value
+  const currentStats = usageDataComposable.state.currentStats
   
   if (currentStats) {
     return currentStats.daysRemaining * 24 * 60 * 60
@@ -375,46 +387,18 @@ const handleReconnect = () => {
   }
 }
 
-// Simulate real-time data updates for demo metrics
-let updateInterval: NodeJS.Timeout | null = null
-
-const startRealTimeUpdates = () => {
-  updateInterval = setInterval(() => {
-    if (isConnected.value) {
-      // Update metrics with simulated data
-      usageMetrics.value = usageMetrics.value.map(metric => ({
-        ...metric,
-        value: Math.max(0, metric.value + (Math.random() - 0.5) * metric.value * 0.1),
-        percentage: Math.max(0, Math.min(100, metric.percentage + (Math.random() - 0.5) * 10)),
-        trend: Math.random() > 0.7 ? (Math.random() > 0.5 ? 'up' : 'down') : metric.trend
-      }))
-
-      // Update summary stats
-      summaryStats.value = {
-        ...summaryStats.value,
-        activeSessions: Math.max(0, summaryStats.value.activeSessions + Math.floor((Math.random() - 0.5) * 5)),
-        totalRequests: summaryStats.value.totalRequests + Math.floor(Math.random() * 10)
-      }
-
-      // Update plan info
-      planInfo.value = {
-        ...planInfo.value,
-        tokensUsed: Math.min(planInfo.value.tokenLimit, planInfo.value.tokensUsed + Math.floor(Math.random() * 50)),
-        tokenUsagePercentage: (planInfo.value.tokensUsed / planInfo.value.tokenLimit) * 100
-      }
-    }
-  }, usageConfig.config.refreshRate || 3000) // Use configured refresh rate
-}
+// Real-time data updates are now handled by WebSocket connection
+// No simulation needed - data comes from the composables
 
 // Lifecycle hooks
 onMounted(() => {
-  startRealTimeUpdates()
+  // WebSocket connection is automatically established by the composables
+  console.log('Usage Dashboard mounted - WebSocket connection established')
 })
 
 onUnmounted(() => {
-  if (updateInterval) {
-    clearInterval(updateInterval)
-  }
+  // Composables handle their own cleanup
+  console.log('Usage Dashboard unmounted')
 })
 </script>
 
