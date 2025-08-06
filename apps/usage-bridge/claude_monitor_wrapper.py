@@ -3,10 +3,12 @@ Enhanced Claude Monitor Library Wrapper.
 Provides dynamic property reading and comprehensive integration with the Claude Monitor library.
 """
 
+import os
 import sys
 import logging
 import importlib
 import inspect
+import contextlib
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Type, Callable
@@ -85,6 +87,19 @@ class ClaudeMonitorWrapper:
         self._functions = {}
         self._setup_monitor()
 
+    @contextlib.contextmanager
+    def _safe_import_context(self):
+        """Context manager to safely import modules without CLI interference."""
+        # Save original sys.argv and replace with safe values
+        original_argv = sys.argv.copy()
+        try:
+            # Set minimal argv to prevent CLI argument parsing
+            sys.argv = [sys.argv[0]]
+            yield
+        finally:
+            # Restore original argv
+            sys.argv = original_argv
+
     def _setup_monitor(self):
         """Set up Claude Monitor library with comprehensive module loading."""
         try:
@@ -96,8 +111,12 @@ class ClaudeMonitorWrapper:
             claude_src_path = str(config.claude_monitor_src_path)
             if claude_src_path not in sys.path:
                 sys.path.insert(0, claude_src_path)
+            
+            # Set environment variable to prevent CLI execution during import
+            os.environ["CLAUDE_MONITOR_DISABLE_CLI"] = "1"
 
             # Dynamic module loading with error handling
+            # Skip CLI-related modules to avoid CLI execution during import
             modules_to_load = {
                 'settings': 'claude_monitor.core.settings',
                 'models': 'claude_monitor.core.models',
@@ -110,10 +129,14 @@ class ClaudeMonitorWrapper:
 
             for name, module_path in modules_to_load.items():
                 try:
-                    self._modules[name] = importlib.import_module(module_path)
-                    logger.debug(f"Loaded module: {module_path}")
+                    # Import modules safely without triggering CLI
+                    with self._safe_import_context():
+                        self._modules[name] = importlib.import_module(module_path)
+                        logger.debug(f"Loaded module: {module_path}")
                 except ImportError as e:
                     logger.warning(f"Failed to load module {module_path}: {e}")
+                except Exception as e:
+                    logger.warning(f"Unexpected error loading module {module_path}: {e}")
 
             # Extract key classes dynamically
             self._extract_classes()
@@ -186,7 +209,9 @@ class ClaudeMonitorWrapper:
             raise RuntimeError("Settings class not available")
         
         try:
-            return self._classes['Settings'](**kwargs)
+            # Use safe import context to prevent CLI argument parsing
+            with self._safe_import_context():
+                return self._classes['Settings'](**kwargs)
         except Exception as e:
             logger.error(f"Failed to create Settings instance: {e}")
             raise

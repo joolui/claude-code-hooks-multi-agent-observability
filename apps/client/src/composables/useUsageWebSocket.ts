@@ -17,7 +17,7 @@ interface UsagePlanInfo {
 }
 
 interface WebSocketMessage {
-  type: 'usage_update' | 'plan_info' | 'error' | 'connection_status'
+  type: 'usage_update' | 'plan_info' | 'error' | 'connection_status' | 'initial' | 'event' | 'pong'
   data: any
   timestamp: number
 }
@@ -136,6 +136,13 @@ export function useUsageWebSocket(url: string) {
         usageData.value = message.data
         break
         
+      case 'initial':
+        // Handle initial data from server
+        if (message.data.usage) {
+          usageData.value = message.data.usage
+        }
+        break
+        
       case 'plan_info':
         planInfo.value = message.data
         break
@@ -149,6 +156,14 @@ export function useUsageWebSocket(url: string) {
         if (message.data.status === 'acknowledged') {
           console.log('Connection acknowledged by server')
         }
+        break
+
+      case 'pong':
+        // Heartbeat response, connection is alive
+        break
+
+      case 'event':
+        // Handle regular events (we're mainly interested in usage updates)
         break
         
       default:

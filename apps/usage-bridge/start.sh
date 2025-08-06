@@ -15,20 +15,14 @@ NC='\033[0m' # No Color
 
 echo -e "${BLUE}🚀 Starting Usage Bridge Service${NC}"
 
-# Check if virtual environment exists
-if [[ ! -d ".venv" ]]; then
-    echo -e "${YELLOW}⚠️  Virtual environment not found. Creating...${NC}"
-    python3 -m venv .venv
-fi
-
-# Activate virtual environment
+# Activate root project virtual environment
 echo -e "${BLUE}📦 Activating virtual environment${NC}"
-source .venv/bin/activate
+source ../../.venv/bin/activate
 
 # Install/upgrade dependencies
 echo -e "${BLUE}📥 Installing dependencies${NC}"
-pip install -q --upgrade pip
-pip install -q -r requirements.txt
+uv pip install -q --upgrade pip
+uv pip install -q -r requirements.txt
 
 # Check if Claude Monitor is available (prioritize submodule)
 CLAUDE_MONITOR_SUBMODULE="${SCRIPT_DIR}/../../Claude-Code-Usage-Monitor"
@@ -37,11 +31,11 @@ CLAUDE_MONITOR_EXTERNAL="${SCRIPT_DIR}/../../../Claude-Code-Usage-Monitor"
 if [[ -d "$CLAUDE_MONITOR_SUBMODULE/src/claude_monitor" ]]; then
     echo -e "${GREEN}✅ Claude Monitor submodule found at: $CLAUDE_MONITOR_SUBMODULE${NC}"
     # Install Claude Monitor from submodule in development mode
-    pip install -q -e "$CLAUDE_MONITOR_SUBMODULE"
+    uv pip install -q -e "$CLAUDE_MONITOR_SUBMODULE"
 elif [[ -d "$CLAUDE_MONITOR_EXTERNAL/src/claude_monitor" ]]; then
     echo -e "${GREEN}✅ Claude Monitor found at: $CLAUDE_MONITOR_EXTERNAL${NC}"
     # Install Claude Monitor in development mode
-    pip install -q -e "$CLAUDE_MONITOR_EXTERNAL"
+    uv pip install -q -e "$CLAUDE_MONITOR_EXTERNAL"
 else
     echo -e "${YELLOW}⚠️  Claude Monitor not found at expected paths:${NC}"
     echo -e "${YELLOW}   - Submodule: $CLAUDE_MONITOR_SUBMODULE${NC}"

@@ -1,4 +1,4 @@
-import { ref, computed, reactive, onUnmounted } from 'vue'
+import { ref, computed, reactive, onUnmounted, readonly } from 'vue'
 
 export interface UsageStats {
   tokensUsed: number
@@ -102,7 +102,7 @@ export function useUsageData() {
   })
 
   // WebSocket connection management
-  const connect = (url: string = 'ws://localhost:4000/usage/stream') => {
+  const connect = (url: string = 'ws://localhost:4000/stream') => {
     if (ws?.readyState === WebSocket.OPEN) {
       return // Already connected
     }
@@ -228,6 +228,7 @@ export function useUsageData() {
   const handleMessage = (message: any) => {
     switch (message.type) {
       case 'usage_stats':
+      case 'usage_update':
         updateUsageStats(message.data)
         break
 
@@ -241,6 +242,13 @@ export function useUsageData() {
 
       case 'plan_info':
         updatePlanInfo(message.data)
+        break
+
+      case 'initial':
+        // Handle initial data from server
+        if (message.data.usage) {
+          updateUsageStats(message.data.usage)
+        }
         break
 
       case 'error':
@@ -258,18 +266,40 @@ export function useUsageData() {
 
   // Data update methods
   const updateUsageStats = (data: any) => {
-    state.currentStats = {
-      tokensUsed: data.tokensUsed || 0,
-      tokenLimit: data.tokenLimit || 200000,
-      tokensPercentage: data.tokensPercentage || 0,
-      messagesUsed: data.messagesUsed || 0,
-      messageLimit: data.messageLimit || 1500,
-      messagesPercentage: data.messagesPercentage || 0,
-      costUsed: data.costUsed || 0,
-      costLimit: data.costLimit || 25.00,
-      costPercentage: data.costPercentage || 0,
-      resetDate: new Date(data.resetDate || Date.now() + 30 * 24 * 60 * 60 * 1000),
-      daysRemaining: data.daysRemaining || 30
+    // Handle bridge service format with structured data
+    if (data.totals && data.current_session) {
+      const currentSession = data.current_session;
+      const totals = data.totals;
+      const tokenCounts = currentSession?.token_counts || { input_tokens: 0, output_tokens: 0 };
+      
+      state.currentStats = {
+        tokensUsed: (tokenCounts.input_tokens || 0) + (tokenCounts.output_tokens || 0),
+        tokenLimit: 200000, // Default, should come from plan
+        tokensPercentage: totals.token_percentage || 0,
+        messagesUsed: currentSession?.sent_messages_count || 0,
+        messageLimit: 1500, // Default, should come from plan
+        messagesPercentage: totals.message_percentage || 0,
+        costUsed: currentSession?.cost_usd || 0,
+        costLimit: 25.00, // Default, should come from plan
+        costPercentage: totals.cost_percentage || 0,
+        resetDate: data.predictions?.limit_resets_at ? new Date(data.predictions.limit_resets_at) : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        daysRemaining: totals.time_to_reset_percentage ? Math.ceil((100 - totals.time_to_reset_percentage) / 100 * 30) : 30
+      }
+    } else {
+      // Handle simple format (legacy or direct format)
+      state.currentStats = {
+        tokensUsed: data.tokensUsed || 0,
+        tokenLimit: data.tokenLimit || 200000,
+        tokensPercentage: data.tokensPercentage || 0,
+        messagesUsed: data.messagesUsed || 0,
+        messageLimit: data.messageLimit || 1500,
+        messagesPercentage: data.messagesPercentage || 0,
+        costUsed: data.costUsed || 0,
+        costLimit: data.costLimit || 25.00,
+        costPercentage: data.costPercentage || 0,
+        resetDate: new Date(data.resetDate || Date.now() + 30 * 24 * 60 * 60 * 1000),
+        daysRemaining: data.daysRemaining || 30
+      }
     }
     state.error = null
   }

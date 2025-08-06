@@ -183,7 +183,7 @@ const {
   error: legacyError, 
   loading: legacyLoading, 
   reconnect: legacyReconnect 
-} = useUsageWebSocket('ws://localhost:4000/usage/stream')
+} = useUsageWebSocket('ws://localhost:4000/stream')
 
 // Use new composable data where available, fallback to legacy
 const isConnected = computed(() => usageDataComposable.isConnected.value || legacyIsConnected.value)
