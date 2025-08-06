@@ -216,13 +216,19 @@ class ClaudeMonitorWrapper:
             logger.error(f"Failed to create Settings instance: {e}")
             raise
 
-    def create_data_manager(self, settings: Any) -> Any:
+    def create_data_manager(self, settings: Any, data_path: Optional[str] = None) -> Any:
         """Create DataManager instance."""
         if 'DataManager' not in self._classes:
             raise RuntimeError("DataManager class not available")
         
         try:
-            return self._classes['DataManager'](settings)
+            # If no data_path provided, use Claude's default location
+            if data_path is None:
+                from pathlib import Path
+                data_path = str(Path("~/.claude/projects").expanduser())
+                logger.info(f"Using default Claude data path: {data_path}")
+                
+            return self._classes['DataManager'](settings, data_path=data_path)
         except Exception as e:
             logger.error(f"Failed to create DataManager instance: {e}")
             raise
@@ -237,6 +243,60 @@ class ClaudeMonitorWrapper:
         except Exception as e:
             logger.error(f"Failed to create MonitoringOrchestrator instance: {e}")
             raise
+
+    def _convert_block_dict_to_session(self, block_data: Dict[str, Any]) -> Optional[SessionBlock]:
+        """Convert analyze_usage block dictionary to SessionBlock."""
+        try:
+            reader = DynamicPropertyReader()
+            
+            # Extract basic info
+            block_id = block_data.get('id', 'unknown')
+            is_active = block_data.get('isActive', False)
+            cost_usd = block_data.get('costUSD', 0.0)
+            messages_count = block_data.get('sentMessagesCount', 0)
+            
+            # Parse timestamps
+            start_time = reader.convert_datetime(block_data.get('startTime'))
+            end_time = reader.convert_datetime(block_data.get('endTime'))
+            
+            # Extract token counts
+            token_counts_data = block_data.get('tokenCounts', {})
+            token_counts = TokenCounts(
+                input_tokens=token_counts_data.get('inputTokens', 0),
+                output_tokens=token_counts_data.get('outputTokens', 0),
+                cache_creation_tokens=token_counts_data.get('cacheCreationInputTokens', 0),
+                cache_read_tokens=token_counts_data.get('cacheReadInputTokens', 0)
+            )
+            
+            # Extract burn rate if available
+            burn_rate = None
+            burn_rate_data = block_data.get('burnRate')
+            if burn_rate_data:
+                burn_rate = BurnRate(
+                    tokens_per_minute=burn_rate_data.get('tokensPerMinute', 0.0),
+                    cost_per_hour=burn_rate_data.get('costPerHour', 0.0)
+                )
+            
+            # Extract models and per-model stats
+            models = block_data.get('models', [])
+            per_model_stats = block_data.get('perModelStats', {})
+            
+            return SessionBlock(
+                id=block_id,
+                start_time=start_time or datetime.utcnow(),
+                end_time=end_time or datetime.utcnow(),
+                is_active=is_active,
+                token_counts=token_counts,
+                cost_usd=cost_usd,
+                burn_rate=burn_rate,
+                models=models,
+                sent_messages_count=messages_count,
+                per_model_stats=per_model_stats
+            )
+            
+        except Exception as e:
+            logger.error(f"Error converting block dictionary to SessionBlock: {e}")
+            return None
 
     def convert_session_block(self, monitor_session: Any) -> SessionBlock:
         """Convert Claude Monitor SessionBlock to API SessionBlock with dynamic property reading."""
@@ -325,8 +385,20 @@ class ClaudeMonitorWrapper:
             settings_kwargs = self._build_settings_kwargs(config_params)
             settings = self.create_settings(**settings_kwargs)
             
-            # Create data manager and orchestrator
-            data_manager = self.create_data_manager(settings)
+            # Create data manager - it will automatically use ~/.claude/projects
+            data_path = str(Path("~/.claude/projects").expanduser())
+            data_manager = self.create_data_manager(settings, data_path=data_path)
+            
+            # Debug: Check if data path exists and has files
+            data_path_obj = Path(data_path)
+            if data_path_obj.exists():
+                jsonl_files = list(data_path_obj.rglob("*.jsonl"))
+                logger.info(f"Data path {data_path} exists with {len(jsonl_files)} JSONL files")
+                for f in jsonl_files[:3]:  # Log first 3 files
+                    logger.info(f"  Found JSONL file: {f}")
+            else:
+                logger.error(f"Data path {data_path} does not exist!")
+            
             orchestrator = self.create_orchestrator(data_manager, settings)
 
             # Get current data (some versions may need refresh/update first)
@@ -338,16 +410,34 @@ class ClaudeMonitorWrapper:
             elif hasattr(orchestrator, 'load_data'):
                 orchestrator.load_data()
             
-            # Get current data using available method
-            if hasattr(orchestrator, 'get_current_data'):
-                current_data = orchestrator.get_current_data()
-            elif hasattr(orchestrator, 'current_data'):
-                current_data = orchestrator.current_data
-            elif hasattr(orchestrator, 'get_data'):
-                current_data = orchestrator.get_data()
+            # Try to get data directly from data_manager first since it's what actually loads the data
+            logger.info("Getting data directly from DataManager.get_data()")
+            raw_data = data_manager.get_data(force_refresh=True)
+            
+            if raw_data:
+                logger.info(f"DataManager returned data with keys: {list(raw_data.keys())}")
+                logger.info(f"Total blocks: {len(raw_data.get('blocks', []))}")
+                logger.info(f"Total tokens: {raw_data.get('total_tokens', 0)}")
+                logger.info(f"Total cost: {raw_data.get('total_cost', 0.0)}")
+                logger.info(f"Entries count: {raw_data.get('entries_count', 0)}")
+                
+                # Use the raw data directly for conversion
+                current_data = raw_data
             else:
-                # Fallback - try to get data from data_manager directly
-                current_data = data_manager
+                logger.error("DataManager.get_data() returned None - no usage data found")
+                current_data = None
+                
+            # Debug: Log what we found
+            if current_data:
+                logger.info(f"Current data type: {type(current_data)}")
+                if isinstance(current_data, dict):
+                    logger.info(f"Current data keys: {list(current_data.keys())}")
+                else:
+                    logger.info(f"Current data attributes: {[attr for attr in dir(current_data) if not attr.startswith('_')]}")
+                    if hasattr(current_data, 'current_session'):
+                        logger.info(f"Found current_session: {current_data.current_session}")
+                    if hasattr(current_data, 'recent_sessions'):
+                        logger.info(f"Found recent_sessions: {len(getattr(current_data, 'recent_sessions', []))} sessions")
 
             # Build usage stats response
             usage_stats = UsageStats(
@@ -357,47 +447,97 @@ class ClaudeMonitorWrapper:
                 totals=UsageTotals()
             )
 
-            # Extract current session
-            current_session = DynamicPropertyReader.safe_getattr(current_data, 'current_session')
-            if current_session:
-                usage_stats.current_session = self.convert_session_block(current_session)
-
-            # Extract recent sessions
-            recent_sessions = DynamicPropertyReader.safe_getattr(current_data, 'recent_sessions', [])
-            if recent_sessions:
-                usage_stats.recent_sessions = [
-                    self.convert_session_block(session) for session in recent_sessions
-                ]
-
-            # Extract burn rate
-            monitor_burn_rate = DynamicPropertyReader.safe_getattr(current_data, 'burn_rate')
-            if monitor_burn_rate:
-                usage_stats.burn_rate = BurnRate(
-                    tokens_per_minute=DynamicPropertyReader.safe_getattr(monitor_burn_rate, 'tokens_per_minute', 0.0),
-                    cost_per_hour=DynamicPropertyReader.safe_getattr(monitor_burn_rate, 'cost_per_hour', 0.0)
-                )
-
-            # Extract predictions
-            predictions_data = DynamicPropertyReader.safe_getattr(current_data, 'predictions')
-            if predictions_data:
-                usage_stats.predictions = UsagePredictions(
-                    tokens_run_out=DynamicPropertyReader.convert_datetime(
-                        DynamicPropertyReader.safe_getattr(predictions_data, 'tokens_run_out')
-                    ),
-                    limit_resets_at=DynamicPropertyReader.convert_datetime(
-                        DynamicPropertyReader.safe_getattr(predictions_data, 'limit_resets_at')
+            if current_data and isinstance(current_data, dict):
+                # Handle analyze_usage format which returns a dictionary with 'blocks'
+                blocks = current_data.get('blocks', [])
+                logger.info(f"Processing {len(blocks)} blocks from analyze_usage")
+                
+                if blocks:
+                    # Convert blocks to SessionBlock format
+                    recent_sessions = []
+                    current_session = None
+                    
+                    for block_data in blocks:
+                        # Create SessionBlock from block dictionary
+                        session_block = self._convert_block_dict_to_session(block_data)
+                        if session_block:
+                            if block_data.get('isActive', False):
+                                current_session = session_block
+                            else:
+                                recent_sessions.append(session_block)
+                    
+                    # Set current and recent sessions
+                    if current_session:
+                        usage_stats.current_session = current_session
+                        logger.info(f"Found active session: {current_session.id}")
+                    
+                    if recent_sessions:
+                        usage_stats.recent_sessions = recent_sessions
+                        logger.info(f"Found {len(recent_sessions)} recent sessions")
+                    
+                    # Calculate totals from all blocks
+                    total_tokens = current_data.get('total_tokens', 0)
+                    total_cost = current_data.get('total_cost', 0.0)
+                    
+                    logger.info(f"Total usage - Tokens: {total_tokens}, Cost: ${total_cost:.2f}")
+                    
+                    # Set basic totals (we don't have limit info from analyze_usage)
+                    usage_stats.totals = UsageTotals(
+                        cost_percentage=0.0,  # Would need limit info
+                        token_percentage=0.0,  # Would need limit info  
+                        message_percentage=0.0,  # Would need limit info
+                        time_to_reset_percentage=0.0  # Would need limit info
                     )
-                )
+                    
+                    # Calculate burn rate from active session if available
+                    if current_session and hasattr(current_session, 'burn_rate') and current_session.burn_rate:
+                        usage_stats.burn_rate = current_session.burn_rate
+                
+            else:
+                # Legacy format - try original extraction
+                logger.info("Trying legacy data extraction format")
+                
+                # Extract current session
+                current_session = DynamicPropertyReader.safe_getattr(current_data, 'current_session')
+                if current_session:
+                    usage_stats.current_session = self.convert_session_block(current_session)
 
-            # Extract totals/percentages
-            totals_data = DynamicPropertyReader.safe_getattr(current_data, 'totals')
-            if totals_data:
-                usage_stats.totals = UsageTotals(
-                    cost_percentage=DynamicPropertyReader.safe_getattr(totals_data, 'cost_percentage', 0.0),
-                    token_percentage=DynamicPropertyReader.safe_getattr(totals_data, 'token_percentage', 0.0),
-                    message_percentage=DynamicPropertyReader.safe_getattr(totals_data, 'message_percentage', 0.0),
-                    time_to_reset_percentage=DynamicPropertyReader.safe_getattr(totals_data, 'time_to_reset_percentage', 0.0)
-                )
+                # Extract recent sessions
+                recent_sessions = DynamicPropertyReader.safe_getattr(current_data, 'recent_sessions', [])
+                if recent_sessions:
+                    usage_stats.recent_sessions = [
+                        self.convert_session_block(session) for session in recent_sessions
+                    ]
+
+                # Extract burn rate
+                monitor_burn_rate = DynamicPropertyReader.safe_getattr(current_data, 'burn_rate')
+                if monitor_burn_rate:
+                    usage_stats.burn_rate = BurnRate(
+                        tokens_per_minute=DynamicPropertyReader.safe_getattr(monitor_burn_rate, 'tokens_per_minute', 0.0),
+                        cost_per_hour=DynamicPropertyReader.safe_getattr(monitor_burn_rate, 'cost_per_hour', 0.0)
+                    )
+
+                # Extract predictions
+                predictions_data = DynamicPropertyReader.safe_getattr(current_data, 'predictions')
+                if predictions_data:
+                    usage_stats.predictions = UsagePredictions(
+                        tokens_run_out=DynamicPropertyReader.convert_datetime(
+                            DynamicPropertyReader.safe_getattr(predictions_data, 'tokens_run_out')
+                        ),
+                        limit_resets_at=DynamicPropertyReader.convert_datetime(
+                            DynamicPropertyReader.safe_getattr(predictions_data, 'limit_resets_at')
+                        )
+                    )
+
+                # Extract totals/percentages
+                totals_data = DynamicPropertyReader.safe_getattr(current_data, 'totals')
+                if totals_data:
+                    usage_stats.totals = UsageTotals(
+                        cost_percentage=DynamicPropertyReader.safe_getattr(totals_data, 'cost_percentage', 0.0),
+                        token_percentage=DynamicPropertyReader.safe_getattr(totals_data, 'token_percentage', 0.0),
+                        message_percentage=DynamicPropertyReader.safe_getattr(totals_data, 'message_percentage', 0.0),
+                        time_to_reset_percentage=DynamicPropertyReader.safe_getattr(totals_data, 'time_to_reset_percentage', 0.0)
+                    )
 
             return usage_stats
 
@@ -463,10 +603,21 @@ class ClaudeMonitorWrapper:
 
     def _build_settings_kwargs(self, config_params: Optional[UsageConfig] = None) -> Dict[str, Any]:
         """Build settings kwargs from config parameters."""
-        settings_kwargs = {}
+        # Start with default settings that match standalone Claude Monitor
+        settings_kwargs = {
+            'plan': 'custom',  # Default plan
+            'view': 'realtime',  # Default view
+            'timezone': 'auto',  # Auto-detect timezone
+            'time_format': '24h',  # Default format
+            'theme': 'dark',  # Default theme
+            'refresh_rate': 10,  # Default refresh rate
+            'refresh_per_second': 1.0,  # Default refresh per second
+            'reset_hour': None,  # Default reset hour
+            'custom_limit_tokens': 200000,  # Default custom limit
+        }
         
         if config_params:
-            # Map API config to Claude Monitor settings
+            # Override with provided config
             settings_kwargs.update({
                 'plan': config_params.plan,
                 'view': config_params.view,
