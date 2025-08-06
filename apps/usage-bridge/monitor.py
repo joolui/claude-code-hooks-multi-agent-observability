@@ -6,8 +6,8 @@ Provides a clean interface to the Claude Monitor library with error handling.
 import logging
 from typing import List, Optional, Dict, Any
 
-from .claude_monitor_wrapper import claude_monitor
-from .models import SessionBlock, UsageStats, UsageConfig
+from claude_monitor_wrapper import claude_monitor
+from models import SessionBlock, UsageStats, UsageConfig
 
 logger = logging.getLogger(__name__)
 

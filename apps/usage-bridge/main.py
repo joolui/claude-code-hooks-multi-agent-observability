@@ -14,8 +14,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
-from .config import config
-from .models import (
+from config import config
+from models import (
     UsageStats, 
     UsageConfig, 
     UsageConfigQuery, 
@@ -23,7 +23,7 @@ from .models import (
     ErrorResponse,
     HealthResponse
 )
-from .monitor import monitor
+from monitor import monitor
 
 # Configure logging
 logging.basicConfig(
